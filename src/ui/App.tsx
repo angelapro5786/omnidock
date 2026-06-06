@@ -1448,6 +1448,11 @@ function RulesView({
   const catchAllActive = selectedDomain?.catch_all_enabled === 1;
   const defaultDomain = domains.find((domain) => domain.is_default === 1) ?? null;
   const isDefaultDomain = selectedDomain?.is_default === 1;
+  const routedAddresses = domainMailboxes
+    .filter((mailbox) => mailbox.routing_enabled === 1)
+    .map((mailbox) => mailbox.address);
+  const receivingStatus = selectedDomain ? describeReceiving(selectedDomain, routedAddresses, catchAllActive) : null;
+  const sendingStatus = selectedDomain ? describeSending(selectedDomain) : null;
 
   return (
     <section className="rules-shell">
@@ -1529,6 +1534,18 @@ function RulesView({
             <StatusPill ok={catchAllActive} label="Catch-all" />
             <StatusPill ok={routedCount > 0 || catchAllActive} label={`${catchAllActive ? "All" : routedCount} routed`} />
           </div>
+          {sendingStatus && receivingStatus ? (
+            <div className="routing-summary" aria-label="Domain email capability summary">
+              <RuleCapabilityItem icon={SendHorizontal} {...sendingStatus} />
+              <RuleCapabilityItem icon={Inbox} {...receivingStatus} />
+              <RuleCapabilityItem
+                icon={FolderGit2}
+                tone="info"
+                title="Inbound storage required"
+                text="Incoming mail is stored only when DB and MAIL_BUCKET bindings are connected. Sending can work even when receiving storage is not ready."
+              />
+            </div>
+          ) : null}
           <div className="domain-card-actions">
             <button
               className="button"
@@ -2343,6 +2360,85 @@ function StatusPill({ ok, label }: { ok: boolean; label: string }) {
       {label}
     </span>
   );
+}
+
+function RuleCapabilityItem({
+  icon: Icon,
+  title,
+  text,
+  tone
+}: {
+  icon: typeof Mail;
+  title: string;
+  text: string;
+  tone: "ok" | "warn" | "info";
+}) {
+  return (
+    <div className={`routing-summary-item ${tone}`}>
+      <Icon size={16} />
+      <div>
+        <strong>{title}</strong>
+        <span>{text}</span>
+      </div>
+    </div>
+  );
+}
+
+function describeSending(domain: DomainRow): { title: string; text: string; tone: "ok" | "warn" | "info" } {
+  if (domain.sending_enabled === 1) {
+    return {
+      title: `Can send from @${domain.domain}`,
+      text: "Outgoing mail is allowed for enabled mailbox addresses on this verified sending domain.",
+      tone: "ok"
+    };
+  }
+
+  return {
+    title: "Cannot send yet",
+    text: "Enable Cloudflare Email Sending for this domain, then run Sync Cloudflare.",
+    tone: "warn"
+  };
+}
+
+function describeReceiving(
+  domain: DomainRow,
+  routedAddresses: string[],
+  catchAllActive: boolean
+): { title: string; text: string; tone: "ok" | "warn" | "info" } {
+  if (domain.routing_enabled !== 1) {
+    return {
+      title: "Cannot receive yet",
+      text: "Email Routing is not active for this domain. Enable routing in Cloudflare, then run Sync Cloudflare.",
+      tone: "warn"
+    };
+  }
+
+  if (catchAllActive) {
+    return {
+      title: `Receives every address at @${domain.domain}`,
+      text: "Catch-all routes unknown addresses and existing mailboxes to this Worker.",
+      tone: "ok"
+    };
+  }
+
+  if (routedAddresses.length > 0) {
+    return {
+      title: `Receives only ${formatAddressList(routedAddresses)}`,
+      text: `Other @${domain.domain} addresses will not arrive until you enable catch-all or route each mailbox.`,
+      tone: "info"
+    };
+  }
+
+  return {
+    title: "Does not receive any address yet",
+    text: "Create a mailbox with Worker rule enabled, route an existing mailbox, or enable catch-all.",
+    tone: "warn"
+  };
+}
+
+function formatAddressList(addresses: string[]): string {
+  if (addresses.length <= 2) return addresses.join(" and ");
+  return `${addresses.slice(0, 2).join(", ")} and ${addresses.length - 2} more`;
 }
 
 function formatDate(value: string): string {

@@ -902,6 +902,68 @@ button:hover:not(:disabled) {
   gap: 7px;
 }
 
+.routing-summary {
+  display: grid;
+  gap: 8px;
+}
+
+.routing-summary-item {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: start;
+  gap: 9px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-alt);
+}
+
+.routing-summary-item svg {
+  margin-top: 1px;
+}
+
+.routing-summary-item strong,
+.routing-summary-item span {
+  display: block;
+  min-width: 0;
+}
+
+.routing-summary-item strong {
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.routing-summary-item span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.routing-summary-item.ok {
+  border-color: var(--selected-line);
+  background: color-mix(in srgb, var(--accent-soft) 62%, var(--panel));
+  color: var(--accent-strong);
+}
+
+.routing-summary-item.warn {
+  border-color: var(--warn-line);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.routing-summary-item.info {
+  border-color: var(--ok-line);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.routing-summary-item.ok span,
+.routing-summary-item.warn span,
+.routing-summary-item.info span {
+  color: color-mix(in srgb, currentColor 72%, var(--muted));
+}
+
 .domain-card-actions {
   display: flex;
   flex-wrap: wrap;
