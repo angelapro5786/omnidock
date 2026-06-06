@@ -5,6 +5,7 @@ import {
   ChevronRight,
   CheckCircle2,
   Circle,
+  Copy,
   Download,
   FileUp,
   FolderGit2,
@@ -668,6 +669,14 @@ function ConfigurationScreen({
   palette: PaletteKey;
   onPaletteChange: (palette: PaletteKey) => void;
 }) {
+  const [copiedName, setCopiedName] = useState<string | null>(null);
+
+  async function copyRequirementName(name: string) {
+    await navigator.clipboard.writeText(name);
+    setCopiedName(name);
+    window.setTimeout(() => setCopiedName((current) => (current === name ? null : current)), 1400);
+  }
+
   return (
     <main className="login-shell">
       <div className="login-tools">
@@ -685,11 +694,27 @@ function ConfigurationScreen({
           <AlertTriangle size={15} />
           <span>{error ?? "Complete Cloudflare setup before first login."}</span>
         </div>
-        <div className="requirement-list">
+        <div className="requirement-list" aria-label="Required Cloudflare configuration">
           {requirements.map((item) => (
             <div className="requirement-row" key={`${item.kind}:${item.name}`}>
-              <span>{item.kind}</span>
-              <code>{item.name}</code>
+              <span className="requirement-kind">{item.kind}</span>
+              <button
+                className="requirement-name"
+                type="button"
+                onClick={() => void copyRequirementName(item.name)}
+                title={`Copy ${item.name}`}
+              >
+                <code>{item.name}</code>
+              </button>
+              <button
+                className="icon-button requirement-copy"
+                type="button"
+                onClick={() => void copyRequirementName(item.name)}
+                title={`Copy ${item.name}`}
+                aria-label={`Copy ${item.name}`}
+              >
+                {copiedName === item.name ? <CheckCircle2 size={15} /> : <Copy size={15} />}
+              </button>
               <p>{item.message}</p>
             </div>
           ))}
