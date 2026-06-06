@@ -1,0 +1,38 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "emailfox",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-06-05",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "./dist/client"
+  },
+  "vars": {
+    // Optional. Leave empty for workers.dev. Set to a custom dashboard host such as "mail.example.com".
+    "MANAGEMENT_HOST": "",
+    // Optional. Leave empty when the API token can access exactly one Cloudflare account.
+    "CLOUDFLARE_ACCOUNT_ID": "",
+    "WORKER_SCRIPT_NAME": "emailfox"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "emailfox-db"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MAIL_BUCKET"
+    }
+  ],
+  "send_email": [
+    {
+      "name": "EMAIL"
+    }
+  ]
+}

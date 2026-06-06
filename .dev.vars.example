@@ -1,0 +1,2 @@
+ADMIN_PASSWORD_BOOTSTRAP=change-me-long-random-password
+CLOUDFLARE_API_TOKEN=cloudflare-api-token-with-zone-email-permissions

@@ -1,0 +1,47 @@
+{
+  "name": "emailfox",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "dev:worker": "wrangler dev",
+    "build": "npm run types && tsc --noEmit && vite build",
+    "check": "npm run types && tsc --noEmit",
+    "deploy": "npm run build && wrangler deploy && npm run db:migrate:remote",
+    "types": "wrangler types",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote"
+  },
+  "cloudflare": {
+    "bindings": {
+      "ADMIN_PASSWORD_BOOTSTRAP": {
+        "description": "Initial admin password used once to bootstrap the D1 password hash. Use a long random value; you can change it in Emailfox after login."
+      },
+      "CLOUDFLARE_API_TOKEN": {
+        "description": "Cloudflare API token used for inventory sync and Email Routing rule management. Recommended scopes: Account Read, Zone Read, Email Routing Read/Edit, Email Sending Read, Workers Scripts Read."
+      },
+      "MANAGEMENT_HOST": {
+        "description": "Optional custom dashboard hostname. Leave blank for the generated workers.dev URL; set it later if you add a custom domain such as mail.example.com."
+      },
+      "CLOUDFLARE_ACCOUNT_ID": {
+        "description": "Optional Cloudflare account id. Leave blank if your API token can access exactly one Cloudflare account."
+      }
+    }
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "6.0.2",
+    "lucide-react": "1.17.0",
+    "postal-mime": "2.7.4",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "vite": "8.0.16"
+  },
+  "devDependencies": {
+    "@types/node": "25.9.2",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "typescript": "6.0.3",
+    "wrangler": "4.98.0"
+  }
+}
