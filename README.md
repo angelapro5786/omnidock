@@ -158,6 +158,8 @@ npm run build && npm run db:migrate:remote && wrangler deploy
 
 Cloudflare provisions the D1/R2 resources before running the configured deploy command in the one-click flow. The migration command then uses the binding name `DB`, which is important because deployers may rename the actual D1 database.
 
+Emailfox also performs a defensive schema check during setup and inbound email handling. If a deploy platform creates D1 but skips or interrupts the migration step, the Worker can complete the current schema on the existing `DB` binding and mark the bundled migrations as applied. It does not create a new D1 database.
+
 If the Cloudflare setup screen asks for commands, use:
 
 - Build command: `npm run build`

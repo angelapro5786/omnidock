@@ -1,4 +1,5 @@
 import { ApiError, RuntimeEnv } from "./http";
+import { ensureDatabaseSchema } from "./schema";
 
 const encoder = new TextEncoder();
 const PASSWORD_ITERATIONS = 100_000;
@@ -21,7 +22,7 @@ export type SetupStatus = {
 };
 
 export async function requireAdmin(request: Request, env: RuntimeEnv): Promise<void> {
-  await ensureAdminAuthTable(env);
+  await ensureDatabaseSchema(env);
 
   const provided = extractPassword(request);
   const record = await getAdminAuth(env);
@@ -37,7 +38,7 @@ export async function requireAdmin(request: Request, env: RuntimeEnv): Promise<v
 }
 
 export async function getSetupStatus(env: RuntimeEnv): Promise<SetupStatus> {
-  await ensureAdminAuthTable(env);
+  await ensureDatabaseSchema(env);
   const record = await getAdminAuth(env);
 
   return {
@@ -50,7 +51,7 @@ export async function createAdminAccount(
   env: RuntimeEnv,
   input: { name: string; email: string; password: string }
 ): Promise<void> {
-  await ensureAdminAuthTable(env);
+  await ensureDatabaseSchema(env);
   const existing = await getAdminAuth(env);
   if (existing) {
     throw new ApiError(409, "setup_complete", "Admin account is already configured");
@@ -77,7 +78,7 @@ export async function createAdminAccount(
 export async function setAdminPassword(env: RuntimeEnv, password: string): Promise<void> {
   validatePassword(password);
 
-  await ensureAdminAuthTable(env);
+  await ensureDatabaseSchema(env);
   const salt = randomSalt();
   const hash = await hashPassword(password, salt, PASSWORD_ITERATIONS);
 
@@ -99,7 +100,7 @@ export async function requestAdminPasswordReset(
   email: string,
   resetOrigin: string
 ): Promise<void> {
-  await ensureAdminAuthTable(env);
+  await ensureDatabaseSchema(env);
   const record = await getAdminAuth(env);
   const normalizedEmail = normalizeAdminEmail(email);
 
@@ -130,7 +131,7 @@ export async function confirmAdminPasswordReset(
   env: RuntimeEnv,
   input: { token: string; password: string }
 ): Promise<void> {
-  await ensureAdminAuthTable(env);
+  await ensureDatabaseSchema(env);
   const record = await getAdminAuth(env);
   const token = input.token.trim();
   if (!record?.reset_token_hash || !record.reset_expires_at || token.length < 24) {
@@ -186,19 +187,6 @@ async function getAdminAuth(env: RuntimeEnv): Promise<AdminAuthRow | null> {
        FROM admin_auth WHERE id = 'primary'`
     ).first<AdminAuthRow>()) ?? null
   );
-}
-
-async function ensureAdminAuthTable(env: RuntimeEnv): Promise<void> {
-  await env.DB.prepare(
-    `CREATE TABLE IF NOT EXISTS admin_auth (
-      id TEXT PRIMARY KEY CHECK (id = 'primary'),
-      password_hash TEXT NOT NULL,
-      password_salt TEXT NOT NULL,
-      password_iterations INTEGER NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`
-  ).run();
 }
 
 async function clearResetToken(env: RuntimeEnv): Promise<void> {

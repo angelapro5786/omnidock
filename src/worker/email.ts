@@ -17,6 +17,7 @@ import {
   recordAudit
 } from "./db";
 import { ApiError, RuntimeEnv, isRecord } from "./http";
+import { ensureDatabaseSchema } from "./schema";
 
 type SendInput = {
   from: string;
@@ -59,6 +60,8 @@ export async function receiveEmail(
   message: ForwardableEmailMessage,
   env: RuntimeEnv
 ): Promise<MessageRow> {
+  await ensureDatabaseSchema(env);
+
   const raw = await new Response(message.raw).arrayBuffer();
   const parsed = await PostalMime.parse(raw);
 
@@ -150,6 +153,8 @@ export async function receiveEmail(
 }
 
 export async function sendEmail(env: RuntimeEnv, input: SendInput): Promise<MessageRow> {
+  await ensureDatabaseSchema(env);
+
   const from = normalizeEmail(input.from);
   const domain = domainFromEmail(from);
   const domainRow = await getDomainByName(env, domain);
