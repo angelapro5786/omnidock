@@ -761,6 +761,54 @@ export async function archiveThread(env: RuntimeEnv, threadId: string, archived:
     .run();
 }
 
+export async function listThreadStorageKeys(env: RuntimeEnv, threadId: string): Promise<string[]> {
+  const keys = new Set<string>();
+
+  const messagesResult = await env.DB.prepare("SELECT id, raw_r2_key FROM messages WHERE thread_id = ?")
+    .bind(threadId)
+    .all<{ id: string; raw_r2_key: string | null }>();
+  const messages = messagesResult.results ?? [];
+
+  for (const message of messages) {
+    if (message.raw_r2_key) {
+      keys.add(message.raw_r2_key);
+    }
+  }
+
+  const attachmentsResult = await env.DB.prepare(
+    `SELECT attachments.r2_key
+     FROM attachments
+     INNER JOIN messages ON messages.id = attachments.message_id
+     WHERE messages.thread_id = ?`
+  )
+    .bind(threadId)
+    .all<{ r2_key: string }>();
+
+  for (const attachment of attachmentsResult.results ?? []) {
+    keys.add(attachment.r2_key);
+  }
+
+  return [...keys];
+}
+
+export async function deleteThread(env: RuntimeEnv, threadId: string): Promise<number> {
+  const messagesResult = await env.DB.prepare("SELECT id FROM messages WHERE thread_id = ?")
+    .bind(threadId)
+    .all<{ id: string }>();
+  const messages = messagesResult.results ?? [];
+
+  if (messages.length === 0) {
+    return 0;
+  }
+
+  for (const message of messages) {
+    await env.DB.prepare("DELETE FROM attachments WHERE message_id = ?").bind(message.id).run();
+  }
+
+  await env.DB.prepare("DELETE FROM messages WHERE thread_id = ?").bind(threadId).run();
+  return messages.length;
+}
+
 export async function getStats(env: RuntimeEnv): Promise<Record<string, number>> {
   const rows = await env.DB.prepare(
     `SELECT

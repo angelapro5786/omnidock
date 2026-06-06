@@ -126,6 +126,10 @@ export class ApiClient {
     });
   }
 
+  deleteThread(threadId: string): Promise<unknown> {
+    return this.request(`/api/threads/${threadId}`, { method: "DELETE" });
+  }
+
   send(input: {
     from: string;
     to: string;

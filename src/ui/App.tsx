@@ -26,6 +26,7 @@ import {
   ShieldCheck,
   Star,
   TerminalSquare,
+  Trash2,
   UserPlus,
   Users,
   X
@@ -437,10 +438,10 @@ export function App() {
     setThread(null);
   };
 
-  async function handleThreadAction(action: "archive" | "unarchive") {
+  async function handleThreadAction(action: "archive" | "unarchive" | "delete") {
     await loadBootstrap();
     await loadThreads();
-    setNotice(action === "archive" ? "Thread archived" : "Thread restored");
+    setNotice(action === "archive" ? "Thread archived" : action === "delete" ? "Thread deleted" : "Thread restored");
   }
 
   return (
@@ -2037,7 +2038,7 @@ function ThreadDetail({
   mailboxes: MailboxRow[];
   folder: FolderKey;
   onSent: () => Promise<void>;
-  onThreadAction: (action: "archive" | "unarchive") => Promise<void>;
+  onThreadAction: (action: "archive" | "unarchive" | "delete") => Promise<void>;
 }) {
   const [replyText, setReplyText] = useState("");
   const [from, setFrom] = useState("");
@@ -2110,6 +2111,23 @@ function ThreadDetail({
     }
   }
 
+  async function deleteCurrentThread() {
+    if (!api || !firstMessage) return;
+    const confirmed = window.confirm("Delete this thread and its stored message files permanently?");
+    if (!confirmed) return;
+
+    setReplyError(null);
+    setBusyAction("delete");
+    try {
+      await api.deleteThread(firstMessage.thread_id);
+      await onThreadAction("delete");
+    } catch (error) {
+      setReplyError(readError(error));
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
   return (
     <section className="thread-detail">
       <div className="detail-head">
@@ -2117,10 +2135,16 @@ function ThreadDetail({
           <span>{firstMessage.mailbox}</span>
           <h2>{firstMessage.subject || "(no subject)"}</h2>
         </div>
-        <button className="button ghost" onClick={() => void patchArchive()} disabled={busyAction !== null}>
-          <Archive size={16} />
-          {folder === "archive" ? "Unarchive" : "Archive"}
-        </button>
+        <div className="detail-actions">
+          <button className="button ghost" onClick={() => void patchArchive()} disabled={busyAction !== null}>
+            <Archive size={16} />
+            {folder === "archive" ? "Unarchive" : "Archive"}
+          </button>
+          <button className="button danger" onClick={() => void deleteCurrentThread()} disabled={busyAction !== null}>
+            <Trash2 size={16} />
+            {busyAction === "delete" ? "Deleting" : "Delete"}
+          </button>
+        </div>
       </div>
 
       <div className="message-stack">

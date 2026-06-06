@@ -13,9 +13,24 @@
     "binding": "ASSETS",
     "directory": "./dist/client"
   },
-  // DB and MAIL_BUCKET are intentionally not hard-coded in the public template.
-  // Add them as Cloudflare dashboard bindings after deploy so forks do not carry
-  // placeholder or personal resource IDs.
+  // Public-safe placeholders. `npm run build` replaces these from
+  // EMAILFOX_D1_DATABASE_ID and EMAILFOX_R2_BUCKET_NAME when they are available
+  // in Cloudflare build variables. If they are not replaced, Cloudflare deploy
+  // fails instead of silently disconnecting dashboard-created bindings.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "emailfox-db",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MAIL_BUCKET",
+      "bucket_name": "emailfox-mail"
+    }
+  ],
   "send_email": [
     {
       "name": "EMAIL"

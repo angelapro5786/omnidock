@@ -15,6 +15,7 @@ import {
 } from "./cloudflare";
 import {
   archiveThread,
+  deleteThread,
   getAttachmentById,
   getMailboxStats,
   getStats,
@@ -24,6 +25,7 @@ import {
   insertMessage,
   listContacts,
   listDomains,
+  listThreadStorageKeys,
   listMailboxSignatures,
   listMailboxes,
   listThreads,
@@ -304,6 +306,32 @@ export async function handleApi(
           throw new ApiError(400, "unknown_action", "Thread action is unknown");
         }
         return json({ ok: true });
+      }
+
+      if (request.method === "DELETE") {
+        const r2Keys = await listThreadStorageKeys(env, threadId);
+        const storageResults = await Promise.allSettled(r2Keys.map((key) => env.MAIL_BUCKET.delete(key)));
+        const failedStorageDeletes = storageResults.filter((result) => result.status === "rejected");
+        if (failedStorageDeletes.length > 0) {
+          throw new ApiError(
+            502,
+            "storage_delete_failed",
+            "Could not delete all stored message objects from R2. Try again."
+          );
+        }
+
+        const deletedMessages = await deleteThread(env, threadId);
+        if (deletedMessages === 0) {
+          throw new ApiError(404, "thread_not_found", "Thread not found");
+        }
+
+        ctx.waitUntil(
+          recordAudit(env, "thread.deleted", threadId, {
+            deletedMessages,
+            deletedObjects: r2Keys.length
+          })
+        );
+        return json({ ok: true, deletedMessages, deletedObjects: r2Keys.length });
       }
 
       return methodNotAllowed();

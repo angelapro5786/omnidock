@@ -607,6 +607,12 @@ button:hover:not(:disabled) {
   color: var(--muted);
 }
 
+.button.danger {
+  border-color: color-mix(in srgb, var(--danger) 74%, var(--line));
+  background: color-mix(in srgb, var(--danger) 8%, var(--control));
+  color: var(--danger);
+}
+
 .button.subtle {
   border-color: var(--line);
   background: var(--panel-alt);
@@ -620,6 +626,12 @@ button:hover:not(:disabled) {
   border-color: var(--hover-line);
   background: var(--hover-bg);
   color: var(--hover-text);
+}
+
+.button.danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: #ffffff;
 }
 
 .button.mini {
@@ -1348,6 +1360,13 @@ button:hover:not(:disabled) {
   margin: 5px 0 0;
   font-size: 20px;
   line-height: 1.2;
+}
+
+.detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .message-stack {

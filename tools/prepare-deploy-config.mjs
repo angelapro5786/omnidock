@@ -1,32 +1,46 @@
 import fs from "node:fs";
 
-const STRICT_FLAG = "EMAILFOX_STRICT_CONFIG_CHECK";
+const CONFIG_PATH = process.env.EMAILFOX_CONFIG_PATH || "wrangler.jsonc";
 const PLACEHOLDER_D1_ID = "00000000-0000-0000-0000-000000000000";
 
-const config = readJsonc("wrangler.jsonc");
-const warnings = [];
+const d1DatabaseId = process.env.EMAILFOX_D1_DATABASE_ID?.trim();
+const d1DatabaseName = process.env.EMAILFOX_D1_DATABASE_NAME?.trim() || "emailfox-db";
+const r2BucketName = process.env.EMAILFOX_R2_BUCKET_NAME?.trim();
+const allowUnboundDeploy = process.env.EMAILFOX_ALLOW_UNBOUND_DEPLOY === "1";
 
-const d1 = Array.isArray(config.d1_databases) ? config.d1_databases.find((item) => item.binding === "DB") : null;
-if (d1 && (!d1.database_id || d1.database_id === PLACEHOLDER_D1_ID)) {
-  warnings.push("DB.database_id is still the public placeholder. Set EMAILFOX_D1_DATABASE_ID as a Cloudflare build variable before normal deploys.");
+const config = readJsonc(CONFIG_PATH);
+let changed = false;
+
+if (allowUnboundDeploy && !d1DatabaseId && !r2BucketName) {
+  delete config.d1_databases;
+  delete config.r2_buckets;
+  changed = true;
+  console.warn("Emailfox removed DB/R2 placeholders for an intentional unbound first deploy.");
+} else if (d1DatabaseId && d1DatabaseId !== PLACEHOLDER_D1_ID) {
+  config.d1_databases = [
+    {
+      binding: "DB",
+      database_name: d1DatabaseName,
+      database_id: d1DatabaseId,
+      migrations_dir: "migrations"
+    }
+  ];
+  changed = true;
 }
 
-const r2 = Array.isArray(config.r2_buckets) ? config.r2_buckets.find((item) => item.binding === "MAIL_BUCKET") : null;
-if (r2 && !r2.bucket_name) {
-  warnings.push("MAIL_BUCKET has no bucket_name. Set EMAILFOX_R2_BUCKET_NAME as a Cloudflare build variable before normal deploys.");
+if (r2BucketName) {
+  config.r2_buckets = [
+    {
+      binding: "MAIL_BUCKET",
+      bucket_name: r2BucketName
+    }
+  ];
+  changed = true;
 }
 
-if (warnings.length > 0) {
-  const strict = process.env[STRICT_FLAG] === "1";
-  const output = strict ? console.error : console.warn;
-  output("Emailfox deploy configuration warning:");
-  for (const warning of warnings) {
-    output(`- ${warning}`);
-  }
-  output("Normal Cloudflare deploys should receive real build variables, otherwise Wrangler may reject the placeholder D1 binding.");
-  if (strict) {
-    process.exit(1);
-  }
+if (changed) {
+  fs.writeFileSync(CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`);
+  console.log(`Emailfox prepared ${CONFIG_PATH} for this build.`);
 }
 
 function readJsonc(path) {
