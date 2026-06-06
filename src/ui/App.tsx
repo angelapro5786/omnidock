@@ -143,7 +143,8 @@ export function App() {
       }
     } catch (error) {
       setLoginError(readError(error));
-      setAuthView("login");
+      setSetup(null);
+      setAuthView("checking");
     }
   }, [resetToken]);
 
@@ -300,6 +301,16 @@ export function App() {
     }
   }
 
+  async function retrySetupStatus() {
+    setBusy(true);
+    setLoginError(null);
+    try {
+      await loadSetupStatus();
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function lock() {
     sessionStorage.removeItem(PASSWORD_KEY);
     setPassword("");
@@ -311,7 +322,15 @@ export function App() {
 
   if (!password) {
     if (authView === "checking") {
-      return <AuthStatusScreen error={loginError} palette={palette} onPaletteChange={setPalette} />;
+      return (
+        <AuthStatusScreen
+          busy={busy}
+          error={loginError}
+          onRetry={retrySetupStatus}
+          palette={palette}
+          onPaletteChange={setPalette}
+        />
+      );
     }
 
     if (authView === "setup") {
@@ -856,11 +875,15 @@ function ResetConfirmScreen({
 }
 
 function AuthStatusScreen({
+  busy,
   error,
+  onRetry,
   palette,
   onPaletteChange
 }: {
+  busy: boolean;
   error: string | null;
+  onRetry: () => void;
   palette: PaletteKey;
   onPaletteChange: (palette: PaletteKey) => void;
 }) {
@@ -881,6 +904,12 @@ function AuthStatusScreen({
           {error ? <AlertTriangle size={15} /> : <ShieldCheck size={15} />}
           <span>{error ?? "Checking setup"}</span>
         </div>
+        {error ? (
+          <button className="button ghost wide" type="button" onClick={onRetry} disabled={busy}>
+            <RefreshCw size={16} />
+            Retry setup check
+          </button>
+        ) : null}
       </section>
     </main>
   );
