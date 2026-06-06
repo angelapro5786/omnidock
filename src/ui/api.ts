@@ -11,8 +11,21 @@ export type ContactInput = {
   email: string;
   name?: string | null;
   company?: string | null;
+  phone?: string | null;
   tags?: string | null;
   notes?: string | null;
+};
+
+export type ContactImportReport = {
+  imported: number;
+  created: number;
+  updated: number;
+  skipped: number;
+  rows: {
+    email: string;
+    status: "created" | "updated" | "skipped";
+    message?: string;
+  }[];
 };
 
 export type ExternalAccountInput = {
@@ -130,7 +143,18 @@ export class ApiClient {
     });
   }
 
-  importContacts(contacts: ContactInput[], source = "upload"): Promise<{ ok: true; imported: number }> {
+  saveContact(input: ContactInput, id?: string | null): Promise<{ ok: true; contact: ContactRow }> {
+    return this.request(id ? `/api/contacts/${id}` : "/api/contacts", {
+      method: id ? "PUT" : "POST",
+      body: JSON.stringify(input)
+    });
+  }
+
+  deleteContact(id: string): Promise<unknown> {
+    return this.request(`/api/contacts/${id}`, { method: "DELETE" });
+  }
+
+  importContacts(contacts: ContactInput[], source = "upload"): Promise<{ ok: true; report: ContactImportReport }> {
     return this.request("/api/contacts/import", {
       method: "POST",
       body: JSON.stringify({ contacts, source })
@@ -164,6 +188,7 @@ export class ApiClient {
     to: string;
     subject: string;
     text: string;
+    html?: string | null;
     replyToThreadId?: string;
     attachments?: AttachmentDraft[];
   }): Promise<unknown> {
@@ -189,7 +214,7 @@ export class ApiClient {
     });
     if (!response.ok) {
       const payload = (await response.json().catch(() => null)) as { error?: { message?: string } } | null;
-      throw new Error(payload?.error?.message ?? `Download failed with ${response.status}`);
+      throw new ApiRequestError(response.status, payload?.error?.message ?? `Download failed with ${response.status}`);
     }
     return response.blob();
   }
@@ -209,7 +234,7 @@ export class ApiClient {
       | null;
 
     if (!response.ok || payload?.ok === false) {
-      throw new Error(payload?.error?.message ?? `Request failed with ${response.status}`);
+      throw new ApiRequestError(response.status, payload?.error?.message ?? `Request failed with ${response.status}`);
     }
 
     return payload as T;
@@ -230,8 +255,18 @@ async function publicRequest<T>(path: string, init: RequestInit = {}): Promise<T
     | null;
 
   if (!response.ok || payload?.ok === false) {
-    throw new Error(payload?.error?.message ?? `Request failed with ${response.status}`);
+    throw new ApiRequestError(response.status, payload?.error?.message ?? `Request failed with ${response.status}`);
   }
 
   return payload as T;
+}
+
+export class ApiRequestError extends Error {
+  constructor(
+    readonly status: number,
+    message: string
+  ) {
+    super(message);
+    this.name = "ApiRequestError";
+  }
 }

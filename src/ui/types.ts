@@ -78,6 +78,7 @@ export type ContactRow = {
   email: string;
   name: string | null;
   company: string | null;
+  phone: string | null;
   tags: string | null;
   notes: string | null;
   source: string;

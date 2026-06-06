@@ -1,6 +1,7 @@
 import {
   AlertTriangle,
   Archive,
+  Bold,
   ChevronDown,
   ChevronRight,
   CheckCircle2,
@@ -13,10 +14,13 @@ import {
   FolderGit2,
   Inbox,
   Loader2,
+  Link,
   Mail,
   Palette,
+  PaintBucket,
   Paperclip,
   PenLine,
+  Phone,
   Plus,
   RefreshCw,
   Reply,
@@ -31,13 +35,15 @@ import {
   Star,
   TerminalSquare,
   Trash2,
+  Type,
   UserPlus,
   Users,
   X
 } from "lucide-react";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ApiClient,
+  ApiRequestError,
   AttachmentDraft,
   ContactInput,
   ExternalAccountInput,
@@ -77,6 +83,18 @@ type ViewKey = "mail" | "rules" | "contacts" | "signatures" | "external" | "othe
 type PaletteKey = "mint" | "ubuntu" | "fedora" | "plasma" | "graphite";
 type SettingsViewKey = Exclude<ViewKey, "mail">;
 type AuthViewKey = "checking" | "configuration" | "login" | "setup" | "reset-request" | "reset-confirm";
+type RichEditorValue = { html: string; text: string };
+type SelectOption = {
+  value: string;
+  label: string;
+  description?: string;
+};
+type ContactParseResult = {
+  contacts: ContactInput[];
+  scanned: number;
+  duplicateEmails: number;
+  ignoredRows: number;
+};
 
 const palettes: {
   key: PaletteKey;
@@ -151,6 +169,12 @@ const externalProviderPresets: Record<
     smtpSecurity: "starttls"
   }
 };
+
+const securityOptions: SelectOption[] = [
+  { value: "ssl", label: "SSL" },
+  { value: "starttls", label: "STARTTLS" },
+  { value: "none", label: "None" }
+];
 
 function initialPalette(): PaletteKey {
   const stored = localStorage.getItem(PALETTE_KEY);
@@ -268,12 +292,17 @@ export function App() {
       setNotice(null);
     } catch (error) {
       const message = readError(error);
-      sessionStorage.removeItem(PASSWORD_KEY);
-      setPassword("");
-      setAuthView("login");
-      setLoginError(message);
-      setNotice(null);
-      clearPrivateState();
+      if (isAuthError(error)) {
+        sessionStorage.removeItem(PASSWORD_KEY);
+        setPassword("");
+        setAuthView("login");
+        setLoginError(message);
+        setNotice(null);
+        clearPrivateState();
+      } else {
+        setNotice(message);
+        setLoginError(null);
+      }
     } finally {
       setBusy(false);
     }
@@ -599,19 +628,16 @@ export function App() {
                 <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search subject, body, sender, recipient" />
               </div>
               <div className="search-scope" aria-label="Mailbox scope">
-                <select
+                <CustomSelect
                   value={selectedMailboxId ?? ""}
-                  onChange={(event) => changeMailboxScope(event.target.value || null)}
+                  onChange={(value) => changeMailboxScope(value || null)}
                   disabled={mailboxes.length === 0}
                   title="Mailbox scope"
-                >
-                  <option value="">All mailboxes</option>
-                  {mailboxes.map((mailbox) => (
-                    <option key={mailbox.id} value={mailbox.id}>
-                      {mailbox.address}
-                    </option>
-                  ))}
-                </select>
+                  options={[
+                    { value: "", label: "All mailboxes" },
+                    ...mailboxes.map((mailbox) => ({ value: mailbox.id, label: mailbox.address }))
+                  ]}
+                />
                 <button
                   className={activeMailbox && defaultMailbox?.id === activeMailbox.id ? "icon-button default-active" : "icon-button"}
                   type="button"
@@ -1344,6 +1370,86 @@ function AuthGate({
   );
 }
 
+function CustomSelect({
+  value,
+  options,
+  onChange,
+  disabled = false,
+  title,
+  className = ""
+}: {
+  value: string;
+  options: SelectOption[];
+  onChange: (value: string) => void;
+  disabled?: boolean;
+  title?: string;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const selected = options.find((option) => option.value === value) ?? options[0] ?? { value: "", label: "Select" };
+
+  useEffect(() => {
+    if (!open) return;
+
+    function closeOnOutside(event: MouseEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+
+    function closeOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", closeOnOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  return (
+    <div className={["custom-select", className, open ? "open" : ""].filter(Boolean).join(" ")} ref={rootRef}>
+      <button
+        className="custom-select-trigger"
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        disabled={disabled || options.length === 0}
+        aria-expanded={open}
+        title={title}
+      >
+        <span>{selected.label}</span>
+        <ChevronDown size={15} />
+      </button>
+      {open ? (
+        <div className="custom-select-menu" role="listbox">
+          {options.map((option) => (
+            <button
+              className={option.value === value ? "custom-select-option active" : "custom-select-option"}
+              key={option.value}
+              type="button"
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+              role="option"
+              aria-selected={option.value === value}
+            >
+              <span>{option.label}</span>
+              {option.description ? <small>{option.description}</small> : null}
+              {option.value === value ? <CheckCircle2 size={14} /> : null}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function PaletteChooser({
   value,
   onChange
@@ -1481,24 +1587,16 @@ function Sidebar({
 
       <label className="mailbox-switcher">
         <span>Mailbox</span>
-        <select
+        <CustomSelect
           value={selectedMailboxId ?? ""}
-          onChange={(event) => onMailboxChange(event.target.value || null)}
+          onChange={(value) => onMailboxChange(value || null)}
           disabled={mailboxes.length === 0}
-        >
-          {mailboxes.length === 0 ? (
-            <option value="">No mailboxes</option>
-          ) : (
-            <>
-              <option value="">All mailboxes</option>
-              {mailboxes.map((mailbox) => (
-                <option key={mailbox.id} value={mailbox.id}>
-                  {mailbox.address}
-                </option>
-              ))}
-            </>
-          )}
-        </select>
+          options={
+            mailboxes.length === 0
+              ? [{ value: "", label: "No mailboxes" }]
+              : [{ value: "", label: "All mailboxes" }, ...mailboxes.map((mailbox) => ({ value: mailbox.id, label: mailbox.address }))]
+          }
+        />
       </label>
 
       <nav className="nav-group">
@@ -1841,6 +1939,21 @@ function RulesView({
   );
 }
 
+function createContactDraft(): ContactInput {
+  return { email: "", name: "", company: "", phone: "", tags: "", notes: "" };
+}
+
+function contactDraftFromRow(contact: ContactRow): ContactInput {
+  return {
+    email: contact.email,
+    name: contact.name ?? "",
+    company: contact.company ?? "",
+    phone: contact.phone ?? "",
+    tags: contact.tags ?? "",
+    notes: contact.notes ?? ""
+  };
+}
+
 function ContactsView({
   api,
   contacts,
@@ -1852,8 +1965,32 @@ function ContactsView({
   onChange: () => Promise<void>;
   onNotice: (message: string | null) => void;
 }) {
-  const [draft, setDraft] = useState<ContactInput>({ email: "", name: "", company: "", tags: "", notes: "" });
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<ContactInput>(() => createContactDraft());
+  const [importLog, setImportLog] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const selectedContact = contacts.find((contact) => contact.id === selectedId) ?? null;
+
+  useEffect(() => {
+    if (!selectedId) return;
+    const contact = contacts.find((item) => item.id === selectedId);
+    if (contact) {
+      setDraft(contactDraftFromRow(contact));
+    } else {
+      setSelectedId(null);
+      setDraft(createContactDraft());
+    }
+  }, [contacts, selectedId]);
+
+  function startNewContact() {
+    setSelectedId(null);
+    setDraft(createContactDraft());
+  }
+
+  function editContact(contact: ContactRow) {
+    setSelectedId(contact.id);
+    setDraft(contactDraftFromRow(contact));
+  }
 
   async function submitManual(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1861,10 +1998,28 @@ function ContactsView({
 
     setBusy(true);
     try {
-      await api.addContact(draft);
-      setDraft({ email: "", name: "", company: "", tags: "", notes: "" });
+      const result = await api.saveContact(draft, selectedId);
+      setSelectedId(result.contact.id);
       await onChange();
-      onNotice("Contact saved");
+      onNotice(selectedId ? "Contact updated" : "Contact saved");
+    } catch (error) {
+      onNotice(readError(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeContact() {
+    if (!api || !selectedContact) return;
+    const confirmed = window.confirm(`Delete contact ${selectedContact.email}?`);
+    if (!confirmed) return;
+
+    setBusy(true);
+    try {
+      await api.deleteContact(selectedContact.id);
+      startNewContact();
+      await onChange();
+      onNotice("Contact deleted");
     } catch (error) {
       onNotice(readError(error));
     } finally {
@@ -1878,14 +2033,30 @@ function ContactsView({
     setBusy(true);
     try {
       const parsed = parseContactsFromText(await file.text(), file.name);
-      if (parsed.length === 0) {
+      const firstLog = [
+        `File: ${file.name}`,
+        `Scanned ${parsed.scanned} row${parsed.scanned === 1 ? "" : "s"}.`,
+        `Found ${parsed.contacts.length} unique contact${parsed.contacts.length === 1 ? "" : "s"}.`,
+        parsed.duplicateEmails > 0 ? `${parsed.duplicateEmails} duplicate email${parsed.duplicateEmails === 1 ? "" : "s"} skipped.` : null,
+        parsed.ignoredRows > 0 ? `${parsed.ignoredRows} row${parsed.ignoredRows === 1 ? "" : "s"} without email skipped.` : null
+      ].filter(Boolean) as string[];
+      setImportLog(firstLog);
+      if (parsed.contacts.length === 0) {
         onNotice("No contacts found in file");
         return;
       }
-      const result = await api.importContacts(parsed, file.name.toLowerCase().endsWith(".vcf") ? "vcard" : "upload");
+      const result = await api.importContacts(parsed.contacts, file.name.toLowerCase().endsWith(".vcf") ? "vcard" : "upload");
       await onChange();
-      onNotice(`${result.imported} contacts imported`);
+      const report = result.report;
+      setImportLog([
+        ...firstLog,
+        `Saved ${report.imported}: ${report.created} new, ${report.updated} updated, ${report.skipped} skipped.`,
+        ...report.rows.slice(0, 14).map((row) => `${row.status}: ${row.email}${row.message ? ` (${row.message})` : ""}`),
+        report.rows.length > 14 ? `${report.rows.length - 14} more rows hidden.` : ""
+      ].filter(Boolean));
+      onNotice(`${report.imported} contacts saved`);
     } catch (error) {
+      setImportLog((current) => [...current, `Error: ${readError(error)}`]);
       onNotice(readError(error));
     } finally {
       setBusy(false);
@@ -1894,12 +2065,12 @@ function ContactsView({
 
   return (
     <section className="settings-shell">
-      <div className="settings-grid">
+      <div className="settings-grid contacts-grid">
         <section className="settings-card">
           <header>
             <div>
               <span>Manual</span>
-              <strong>Add contact</strong>
+              <strong>{selectedContact ? "Edit contact" : "Add contact"}</strong>
             </div>
             <UserPlus size={18} />
           </header>
@@ -1921,15 +2092,23 @@ function ContactsView({
               />
             </label>
             <label>
-              Company
-              <input
-                value={draft.company ?? ""}
-                onChange={(event) => setDraft((current) => ({ ...current, company: event.target.value }))}
-                placeholder="Example Inc."
-              />
-            </label>
-            <label>
-              Tags
+	              Company
+	              <input
+	                value={draft.company ?? ""}
+	                onChange={(event) => setDraft((current) => ({ ...current, company: event.target.value }))}
+	                placeholder="Example Inc."
+	              />
+	            </label>
+	            <label>
+	              Phone
+	              <input
+	                value={draft.phone ?? ""}
+	                onChange={(event) => setDraft((current) => ({ ...current, phone: event.target.value }))}
+	                placeholder="+1 555 0100"
+	              />
+	            </label>
+	            <label>
+	              Tags
               <input
                 value={draft.tags ?? ""}
                 onChange={(event) => setDraft((current) => ({ ...current, tags: event.target.value }))}
@@ -1944,12 +2123,22 @@ function ContactsView({
                 placeholder="Context"
               />
             </label>
-            <button className="button primary" type="submit" disabled={busy || !draft.email?.trim()}>
-              <Save size={16} />
-              Save contact
-            </button>
-          </form>
-        </section>
+	            <div className="contact-editor-actions">
+	              <button className="button primary" type="submit" disabled={busy || !draft.email?.trim()}>
+	                <Save size={16} />
+	                {selectedContact ? "Update contact" : "Save contact"}
+	              </button>
+	              <button className="button ghost" type="button" onClick={startNewContact} disabled={busy}>
+	                <Plus size={16} />
+	                New
+	              </button>
+	              <button className="button danger" type="button" onClick={() => void removeContact()} disabled={busy || !selectedContact}>
+	                <Trash2 size={16} />
+	                Delete
+	              </button>
+	            </div>
+	          </form>
+	        </section>
 
         <section className="settings-card">
           <header>
@@ -1965,12 +2154,22 @@ function ContactsView({
             <input
               type="file"
               accept=".csv,.txt,.vcf,text/csv,text/plain,text/vcard"
-              disabled={busy}
-              onChange={(event) => void importFile(event.target.files?.[0] ?? null)}
-            />
-          </label>
-          <p className="settings-note">CSV headers can be email, name, company, tags and notes. Plain text imports every email address it finds.</p>
-        </section>
+	              disabled={busy}
+	              onChange={(event) => {
+	                void importFile(event.target.files?.[0] ?? null);
+	                event.currentTarget.value = "";
+	              }}
+	            />
+	          </label>
+	          <p className="settings-note">CSV headers can be email, name, company, phone, tags and notes. Plain text imports every email address it finds.</p>
+	          {importLog.length > 0 ? (
+	            <div className="import-log" aria-live="polite">
+	              {importLog.map((line, index) => (
+	                <span key={`${line}-${index}`}>{line}</span>
+	              ))}
+	            </div>
+	          ) : null}
+	        </section>
 
         <section className="settings-table-card">
           <header>
@@ -1983,16 +2182,27 @@ function ContactsView({
             {contacts.length === 0 ? (
               <div className="empty-state">No contacts</div>
             ) : (
-              contacts.map((contact) => (
-                <div className="contact-row" key={contact.id}>
-                  <Users size={15} />
-                  <div>
-                    <strong>{contact.name || contact.email}</strong>
-                    <span>{contact.email}</span>
-                  </div>
-                  <b>{contact.company || contact.tags || contact.source}</b>
-                </div>
-              ))
+	              contacts.map((contact) => (
+	                <button
+	                  className={selectedId === contact.id ? "contact-row active" : "contact-row"}
+	                  key={contact.id}
+	                  type="button"
+	                  onClick={() => editContact(contact)}
+	                >
+	                  <Users size={15} />
+	                  <div>
+	                    <strong>{contact.name || contact.email}</strong>
+	                    <span>{contact.email}</span>
+	                    {contact.phone ? (
+	                      <small>
+	                        <Phone size={12} />
+	                        {contact.phone}
+	                      </small>
+	                    ) : null}
+	                  </div>
+	                  <b>{contact.company || contact.tags || contact.source}</b>
+	                </button>
+	              ))
             )}
           </div>
         </section>
@@ -2265,13 +2475,11 @@ function ExternalAccountsView({
             <div className="external-form-grid">
               <label>
                 Provider
-                <select value={draft.provider} onChange={(event) => changeProvider(event.target.value)}>
-                  {Object.entries(externalProviderPresets).map(([key, preset]) => (
-                    <option key={key} value={key}>
-                      {preset.label}
-                    </option>
-                  ))}
-                </select>
+                <CustomSelect
+                  value={draft.provider}
+                  onChange={changeProvider}
+                  options={Object.entries(externalProviderPresets).map(([key, preset]) => ({ value: key, label: preset.label }))}
+                />
               </label>
               <label>
                 Email
@@ -2296,11 +2504,15 @@ function ExternalAccountsView({
               </label>
               <label>
                 Auth
-                <select value={draft.authType} onChange={(event) => updateDraft({ authType: event.target.value })}>
-                  <option value="app_password">App password</option>
-                  <option value="oauth2">OAuth2</option>
-                  <option value="none">None</option>
-                </select>
+                <CustomSelect
+                  value={draft.authType}
+                  onChange={(value) => updateDraft({ authType: value })}
+                  options={[
+                    { value: "app_password", label: "App password" },
+                    { value: "oauth2", label: "OAuth2" },
+                    { value: "none", label: "None" }
+                  ]}
+                />
               </label>
               <label>
                 Credential secret
@@ -2348,11 +2560,11 @@ function ExternalAccountsView({
               </label>
               <label>
                 IMAP security
-                <select value={draft.imapSecurity} onChange={(event) => updateDraft({ imapSecurity: event.target.value })}>
-                  <option value="ssl">SSL</option>
-                  <option value="starttls">STARTTLS</option>
-                  <option value="none">None</option>
-                </select>
+                <CustomSelect
+                  value={draft.imapSecurity}
+                  onChange={(value) => updateDraft({ imapSecurity: value })}
+                  options={securityOptions}
+                />
               </label>
               <label>
                 SMTP host
@@ -2370,11 +2582,11 @@ function ExternalAccountsView({
               </label>
               <label>
                 SMTP security
-                <select value={draft.smtpSecurity} onChange={(event) => updateDraft({ smtpSecurity: event.target.value })}>
-                  <option value="ssl">SSL</option>
-                  <option value="starttls">STARTTLS</option>
-                  <option value="none">None</option>
-                </select>
+                <CustomSelect
+                  value={draft.smtpSecurity}
+                  onChange={(value) => updateDraft({ smtpSecurity: value })}
+                  options={securityOptions}
+                />
               </label>
             </div>
 
@@ -2556,6 +2768,100 @@ function ThreadList({
   );
 }
 
+function RichTextEditor({
+  value,
+  onChange,
+  placeholder
+}: {
+  value: RichEditorValue;
+  onChange: (value: RichEditorValue) => void;
+  placeholder: string;
+}) {
+  const editorRef = useRef<HTMLDivElement>(null);
+  const [textColor, setTextColor] = useState("#111827");
+  const [backgroundColor, setBackgroundColor] = useState("#fff3bf");
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || document.activeElement === editor) return;
+    if (editor.innerHTML !== value.html) {
+      editor.innerHTML = value.html;
+    }
+  }, [value.html]);
+
+  function emitValue(clean = false) {
+    const editor = editorRef.current;
+    if (!editor) return;
+    if (clean) {
+      editor.innerHTML = sanitizeEmailHtml(autoLinkHtml(editor.innerHTML));
+    }
+    onChange({
+      html: editor.innerHTML,
+      text: editor.innerText.replace(/\u00a0/g, " ")
+    });
+  }
+
+  function runCommand(command: string, commandValue?: string) {
+    editorRef.current?.focus();
+    document.execCommand(command, false, commandValue);
+    emitValue();
+  }
+
+  function addLink() {
+    const selectedText = window.getSelection()?.toString().trim() ?? "";
+    const initialValue = selectedText && normalizeLinkHref(selectedText) ? selectedText : "https://";
+    const href = normalizeLinkHref(window.prompt("Link URL", initialValue) ?? "");
+    if (!href) return;
+    runCommand("createLink", href);
+  }
+
+  return (
+    <div className="rich-editor">
+      <div className="rich-toolbar" aria-label="Message formatting">
+        <button className="icon-button" type="button" onClick={() => runCommand("bold")} title="Bold">
+          <Bold size={15} />
+        </button>
+        <label className="rich-color-button" title="Text color">
+          <Type size={15} />
+          <input
+            type="color"
+            value={textColor}
+            onChange={(event) => {
+              setTextColor(event.target.value);
+              runCommand("foreColor", event.target.value);
+            }}
+          />
+        </label>
+        <label className="rich-color-button" title="Background color">
+          <PaintBucket size={15} />
+          <input
+            type="color"
+            value={backgroundColor}
+            onChange={(event) => {
+              setBackgroundColor(event.target.value);
+              runCommand("hiliteColor", event.target.value);
+            }}
+          />
+        </label>
+        <button className="icon-button" type="button" onClick={addLink} title="Add link">
+          <Link size={15} />
+        </button>
+      </div>
+      <div
+        className="rich-editor-surface"
+        contentEditable
+        data-placeholder={placeholder}
+        onBlur={() => emitValue(true)}
+        onInput={() => emitValue()}
+        ref={editorRef}
+        role="textbox"
+        spellCheck
+        suppressContentEditableWarning
+      />
+    </div>
+  );
+}
+
 function ThreadDetail({
   api,
   thread,
@@ -2571,7 +2877,7 @@ function ThreadDetail({
   onSent: () => Promise<void>;
   onThreadAction: (action: "archive" | "unarchive" | "delete") => Promise<void>;
 }) {
-  const [replyText, setReplyText] = useState("");
+  const [replyDraft, setReplyDraft] = useState<RichEditorValue>({ html: "", text: "" });
   const [from, setFrom] = useState("");
   const [replyAttachments, setReplyAttachments] = useState<AttachmentDraft[]>([]);
   const [replyAttachmentsLoading, setReplyAttachmentsLoading] = useState(false);
@@ -2592,7 +2898,7 @@ function ThreadDetail({
   }, [firstMessage?.thread_id, from, preferredFrom, sendableMailboxes]);
 
   useEffect(() => {
-    setReplyText("");
+    setReplyDraft({ html: "", text: "" });
     setReplyAttachments([]);
     setReplyAttachmentsLoading(false);
     setReplyError(null);
@@ -2611,9 +2917,9 @@ function ThreadDetail({
   async function submitReply(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (
-      !api ||
-      replyAttachmentsLoading ||
-      (!replyText.trim() && replyAttachments.length === 0) ||
+	      !api ||
+	      replyAttachmentsLoading ||
+	      (!replyDraft.text.trim() && replyAttachments.length === 0) ||
       !from ||
       !lastInbound ||
       !firstMessage
@@ -2623,15 +2929,16 @@ function ThreadDetail({
     setReplyError(null);
     setBusyAction("reply");
     try {
-      await api.send({
-        from,
-        to: lastInbound.from_address,
-        subject: firstMessage.subject.startsWith("Re:") ? firstMessage.subject : `Re: ${firstMessage.subject}`,
-        text: replyText,
-        replyToThreadId: firstMessage.thread_id,
-        attachments: replyAttachments
-      });
-      setReplyText("");
+	      await api.send({
+	        from,
+	        to: lastInbound.from_address,
+	        subject: firstMessage.subject.startsWith("Re:") ? firstMessage.subject : `Re: ${firstMessage.subject}`,
+	        text: replyDraft.text,
+	        html: prepareOutgoingHtml(replyDraft),
+	        replyToThreadId: firstMessage.thread_id,
+	        attachments: replyAttachments
+	      });
+	      setReplyDraft({ html: "", text: "" });
       setReplyAttachments([]);
       await onSent();
     } catch (error) {
@@ -2701,7 +3008,17 @@ function ThreadDetail({
               </div>
               <time>{formatDate(message.created_at)}</time>
             </header>
-            <pre>{message.text_body || message.snippet || "No text body"}</pre>
+	            {message.html_body ? (
+	              <div
+	                className="message-html"
+	                dangerouslySetInnerHTML={{ __html: sanitizeEmailHtml(message.html_body) }}
+	              />
+	            ) : (
+	              <div
+	                className="message-text"
+	                dangerouslySetInnerHTML={{ __html: textToHtmlWithLinks(message.text_body || message.snippet || "No text body") }}
+	              />
+	            )}
             {thread.attachments.filter((attachment) => attachment.message_id === message.id).length > 0 ? (
               <div className="attachment-strip">
                 {thread.attachments
@@ -2727,13 +3044,11 @@ function ThreadDetail({
         <div className="reply-tools">
           <label>
             From
-            <select value={from} onChange={(event) => setFrom(event.target.value)}>
-              {sendableMailboxes.map((mailbox) => (
-                <option key={mailbox.id} value={mailbox.address}>
-                  {mailbox.address}
-                </option>
-              ))}
-            </select>
+	            <CustomSelect
+	              value={from}
+	              onChange={setFrom}
+	              options={sendableMailboxes.map((mailbox) => ({ value: mailbox.address, label: mailbox.address }))}
+	            />
           </label>
           <span>
             <Reply size={14} />
@@ -2746,7 +3061,7 @@ function ThreadDetail({
             <span>{replyError}</span>
           </div>
         ) : null}
-        <textarea value={replyText} onChange={(event) => setReplyText(event.target.value)} placeholder="Reply" />
+	        <RichTextEditor value={replyDraft} onChange={setReplyDraft} placeholder="Reply" />
         <AttachmentPicker
           value={replyAttachments}
           onChange={setReplyAttachments}
@@ -2757,9 +3072,9 @@ function ThreadDetail({
           className="button primary send-button"
           type="submit"
           disabled={
-            busyAction !== null ||
-            replyAttachmentsLoading ||
-            (!replyText.trim() && replyAttachments.length === 0) ||
+	            busyAction !== null ||
+	            replyAttachmentsLoading ||
+	            (!replyDraft.text.trim() && replyAttachments.length === 0) ||
             !from
           }
         >
@@ -2800,7 +3115,7 @@ function ComposeDialog({
   const [from, setFrom] = useState(initialSendableFrom);
   const [to, setTo] = useState("");
   const [subject, setSubject] = useState("");
-  const [text, setText] = useState("");
+  const [draft, setDraft] = useState<RichEditorValue>({ html: "", text: "" });
   const [attachments, setAttachments] = useState<AttachmentDraft[]>([]);
   const [attachmentsLoading, setAttachmentsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -2818,7 +3133,7 @@ function ComposeDialog({
     setError(null);
     setBusy(true);
     try {
-      await api.send({ from, to, subject, text, attachments });
+      await api.send({ from, to, subject, text: draft.text, html: prepareOutgoingHtml(draft), attachments });
       await onSent();
     } catch (sendError) {
       setError(readError(sendError));
@@ -2842,45 +3157,43 @@ function ComposeDialog({
             <span>{error}</span>
           </div>
         ) : null}
-        <label>
-          From
-          <select value={from} onChange={(event) => setFrom(event.target.value)}>
-            {sendableMailboxes.map((mailbox) => (
-              <option key={mailbox.id} value={mailbox.address}>
-                {mailbox.address}
-              </option>
-            ))}
-          </select>
-        </label>
+	        <label>
+	          From
+	          <CustomSelect
+	            value={from}
+	            onChange={setFrom}
+	            options={sendableMailboxes.map((mailbox) => ({ value: mailbox.address, label: mailbox.address }))}
+	          />
+	        </label>
         <label>
           To
           <input value={to} onChange={(event) => setTo(event.target.value)} placeholder="ops@example.com" />
         </label>
         {contacts.length > 0 ? (
-          <label>
-            Contacts
-            <select
-              value=""
-              onChange={(event) => {
-                const email = event.target.value;
-                if (!email) return;
-                setTo((current) => appendAddress(current, email));
-              }}
-            >
-              <option value="">Select contact</option>
-              {contacts.map((contact) => (
-                <option key={contact.id} value={contact.email}>
-                  {contact.name ? `${contact.name} <${contact.email}>` : contact.email}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : null}
+	          <label>
+	            Contacts
+	            <CustomSelect
+	              value=""
+	              onChange={(email) => {
+	                if (!email) return;
+	                setTo((current) => appendAddress(current, email));
+	              }}
+	              options={[
+	                { value: "", label: "Select contact" },
+	                ...contacts.map((contact) => ({
+	                  value: contact.email,
+	                  label: contact.name ? `${contact.name} <${contact.email}>` : contact.email,
+	                  description: contact.phone ?? contact.company ?? undefined
+	                }))
+	              ]}
+	            />
+	          </label>
+	        ) : null}
         <label>
           Subject
           <input value={subject} onChange={(event) => setSubject(event.target.value)} />
         </label>
-        <textarea value={text} onChange={(event) => setText(event.target.value)} placeholder="Message" />
+	        <RichTextEditor value={draft} onChange={setDraft} placeholder="Message" />
         <AttachmentPicker
           value={attachments}
           onChange={setAttachments}
@@ -3219,6 +3532,10 @@ function readError(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown error";
 }
 
+function isAuthError(error: unknown): boolean {
+  return error instanceof ApiRequestError && (error.status === 401 || error.status === 403);
+}
+
 function appendAddress(current: string, email: string): string {
   const values = current
     .split(/[,\n;]/)
@@ -3273,68 +3590,271 @@ function formatBytes(value: number): string {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function parseContactsFromText(text: string, filename: string): ContactInput[] {
+function prepareOutgoingHtml(value: RichEditorValue): string | null {
+  if (!value.text.trim()) return null;
+  return sanitizeEmailHtml(autoLinkHtml(value.html || textToHtmlWithLinks(value.text))).trim() || textToHtmlWithLinks(value.text);
+}
+
+function textToHtmlWithLinks(text: string): string {
+  const container = document.createElement("div");
+  const lines = text.split(/\r?\n/);
+  lines.forEach((line, index) => {
+    if (index > 0) container.appendChild(document.createElement("br"));
+    container.appendChild(document.createTextNode(line));
+  });
+  linkifyTextNodes(container);
+  return container.innerHTML;
+}
+
+function autoLinkHtml(html: string): string {
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  linkifyTextNodes(template.content);
+  return template.innerHTML;
+}
+
+function sanitizeEmailHtml(html: string): string {
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  sanitizeHtmlNode(template.content);
+  return template.innerHTML;
+}
+
+function sanitizeHtmlNode(root: Node) {
+  const allowedTags = new Set(["A", "B", "BLOCKQUOTE", "BR", "CODE", "DIV", "EM", "FONT", "I", "LI", "OL", "P", "PRE", "SPAN", "STRONG", "U", "UL"]);
+  const blockedTags = new Set(["EMBED", "IFRAME", "LINK", "META", "OBJECT", "SCRIPT", "STYLE"]);
+
+  for (const child of Array.from(root.childNodes)) {
+    if (child.nodeType === Node.TEXT_NODE) continue;
+    if (child.nodeType !== Node.ELEMENT_NODE) {
+      child.remove();
+      continue;
+    }
+
+    const element = child as HTMLElement;
+    const tagName = element.tagName.toUpperCase();
+    if (blockedTags.has(tagName)) {
+      element.remove();
+      continue;
+    }
+
+    sanitizeHtmlNode(element);
+
+    if (!allowedTags.has(tagName)) {
+      element.replaceWith(...Array.from(element.childNodes));
+      continue;
+    }
+
+    const href = tagName === "A" ? normalizeLinkHref(element.getAttribute("href") ?? "") : null;
+    const colorAttribute = tagName === "FONT" ? element.getAttribute("color") : null;
+    const cleanStyle = sanitizeInlineStyle(element.getAttribute("style"), colorAttribute);
+
+    for (const attribute of Array.from(element.attributes)) {
+      element.removeAttribute(attribute.name);
+    }
+
+    if (tagName === "A" && href) {
+      element.setAttribute("href", href);
+      element.setAttribute("target", "_blank");
+      element.setAttribute("rel", "noopener noreferrer");
+    }
+    if (cleanStyle) {
+      element.setAttribute("style", cleanStyle);
+    }
+  }
+}
+
+function sanitizeInlineStyle(style: string | null, colorAttribute: string | null): string {
+  const clean: string[] = [];
+  const allowed = new Set(["background-color", "color", "font-style", "font-weight", "text-decoration"]);
+  for (const part of (style ?? "").split(";")) {
+    const [rawProperty, ...rawValue] = part.split(":");
+    const property = rawProperty?.trim().toLowerCase();
+    const value = rawValue.join(":").trim();
+    if (!property || !value || !allowed.has(property) || /url|expression|javascript|data:/i.test(value)) continue;
+    if ((property === "color" || property === "background-color") && !isSafeCssColor(value)) continue;
+    if (property === "font-style" && !/^(normal|italic|oblique)$/i.test(value)) continue;
+    if (property === "font-weight" && !/^(normal|bold|[1-9]00)$/i.test(value)) continue;
+    if (property === "text-decoration" && !/^(none|underline|line-through)$/i.test(value)) continue;
+    clean.push(`${property}: ${value}`);
+  }
+
+  if (colorAttribute && isSafeCssColor(colorAttribute) && !clean.some((item) => item.startsWith("color:"))) {
+    clean.push(`color: ${colorAttribute}`);
+  }
+
+  return clean.join("; ");
+}
+
+function isSafeCssColor(value: string): boolean {
+  const color = value.trim();
+  return (
+    color.length <= 48 &&
+    (/^#[0-9a-f]{3,8}$/i.test(color) ||
+      /^(rgb|rgba|hsl|hsla)\([0-9%.,\s]+\)$/i.test(color) ||
+      /^[a-z]+$/i.test(color))
+  );
+}
+
+function linkifyTextNodes(root: Node) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      let parent = node.parentElement;
+      while (parent) {
+        if (parent.tagName.toUpperCase() === "A") return NodeFilter.FILTER_REJECT;
+        parent = parent.parentElement;
+      }
+      return NodeFilter.FILTER_ACCEPT;
+    }
+  });
+  const nodes: Text[] = [];
+  while (walker.nextNode()) {
+    nodes.push(walker.currentNode as Text);
+  }
+  nodes.forEach(linkifyTextNode);
+}
+
+function linkifyTextNode(node: Text) {
+  const value = node.nodeValue ?? "";
+  const pattern = /((?:https?:\/\/|www\.)[^\s<]+|[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/gi;
+  const matches = [...value.matchAll(pattern)];
+  if (matches.length === 0) return;
+
+  const fragment = document.createDocumentFragment();
+  let cursor = 0;
+  for (const match of matches) {
+    const start = match.index ?? 0;
+    const raw = match[0];
+    if (start > cursor) {
+      fragment.appendChild(document.createTextNode(value.slice(cursor, start)));
+    }
+    const trailing = raw.match(/[),.!?;:]+$/)?.[0] ?? "";
+    const core = trailing ? raw.slice(0, -trailing.length) : raw;
+    const href = normalizeLinkHref(core);
+    if (href) {
+      const link = document.createElement("a");
+      link.href = href;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = core;
+      fragment.appendChild(link);
+    } else {
+      fragment.appendChild(document.createTextNode(core));
+    }
+    if (trailing) {
+      fragment.appendChild(document.createTextNode(trailing));
+    }
+    cursor = start + raw.length;
+  }
+  if (cursor < value.length) {
+    fragment.appendChild(document.createTextNode(value.slice(cursor)));
+  }
+  node.replaceWith(fragment);
+}
+
+function normalizeLinkHref(value: string): string | null {
+  const raw = value.trim();
+  if (!raw) return null;
+  if (/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(raw)) {
+    return `mailto:${raw}`;
+  }
+  const withProtocol = raw.startsWith("www.") ? `https://${raw}` : raw;
+  try {
+    const url = new URL(withProtocol);
+    return ["http:", "https:", "mailto:", "tel:"].includes(url.protocol) ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseContactsFromText(text: string, filename: string): ContactParseResult {
   const lowerName = filename.toLowerCase();
   const contacts = lowerName.endsWith(".vcf") ? parseVcards(text) : parseDelimitedContacts(text);
   const unique = new Map<string, ContactInput>();
+  let duplicateEmails = 0;
 
-  for (const contact of contacts) {
+  for (const contact of contacts.contacts) {
     const email = contact.email?.trim().toLowerCase();
     if (email && !unique.has(email)) {
       unique.set(email, { ...contact, email });
+    } else if (email) {
+      duplicateEmails += 1;
     }
   }
 
-  return [...unique.values()].slice(0, 1000);
+  return {
+    contacts: [...unique.values()].slice(0, 1000),
+    scanned: contacts.scanned,
+    duplicateEmails,
+    ignoredRows: contacts.ignoredRows
+  };
 }
 
-function parseVcards(text: string): ContactInput[] {
+function parseVcards(text: string): { contacts: ContactInput[]; scanned: number; ignoredRows: number } {
   const contacts: ContactInput[] = [];
+  let scanned = 0;
+  let ignoredRows = 0;
   for (const block of text.split(/BEGIN:VCARD/i)) {
+    if (!block.trim()) continue;
+    scanned += 1;
     const email = block.match(/^EMAIL[^:]*:(.+)$/im)?.[1]?.trim();
     if (email) {
       contacts.push({
         email,
         name: block.match(/^FN[^:]*:(.+)$/im)?.[1]?.trim() ?? null,
         company: block.match(/^ORG[^:]*:(.+)$/im)?.[1]?.trim() ?? null,
+        phone: block.match(/^TEL[^:]*:(.+)$/im)?.[1]?.trim() ?? null,
         tags: "vcard",
         notes: null
       });
+    } else {
+      ignoredRows += 1;
     }
   }
-  return contacts;
+  return { contacts, scanned, ignoredRows };
 }
 
-function parseDelimitedContacts(text: string): ContactInput[] {
+function parseDelimitedContacts(text: string): { contacts: ContactInput[]; scanned: number; ignoredRows: number } {
   const lines = text
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
-  if (lines.length === 0) return [];
+  if (lines.length === 0) return { contacts: [], scanned: 0, ignoredRows: 0 };
 
   const header = parseCsvLine(lines[0]).map((item) => item.toLowerCase());
   const emailColumn = header.findIndex((item) => ["email", "e-mail", "mail"].includes(item));
 
   if (emailColumn >= 0) {
-    return lines.slice(1).flatMap((line) => {
+    let ignoredRows = 0;
+    const contacts = lines.slice(1).flatMap((line) => {
       const cells = parseCsvLine(line);
       const email = cells[emailColumn]?.trim();
-      if (!email) return [];
+      if (!email) {
+        ignoredRows += 1;
+        return [];
+      }
+      const firstName = cellByHeader(cells, header, ["first name", "firstname", "given name"]) ?? "";
+      const lastName = cellByHeader(cells, header, ["last name", "lastname", "surname", "family name"]) ?? "";
+      const combinedName = [firstName, lastName].filter(Boolean).join(" ").trim();
       return [
         {
           email,
-          name: cellByHeader(cells, header, ["name", "full name", "display name"]),
+          name: cellByHeader(cells, header, ["name", "full name", "display name"]) ?? (combinedName || null),
           company: cellByHeader(cells, header, ["company", "organization", "org"]),
+          phone: cellByHeader(cells, header, ["phone", "phone number", "mobile", "mobile phone", "tel", "telephone"]),
           tags: cellByHeader(cells, header, ["tags", "tag", "groups"]),
           notes: cellByHeader(cells, header, ["notes", "note"])
         }
       ];
     });
+    return { contacts, scanned: Math.max(0, lines.length - 1), ignoredRows };
   }
 
   const contacts: ContactInput[] = [];
+  let ignoredRows = 0;
   const emailPattern = /[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+/gi;
   for (const line of lines) {
+    let foundInLine = false;
     for (const match of line.matchAll(emailPattern)) {
       const email = match[0];
       const name = line
@@ -3342,10 +3862,18 @@ function parseDelimitedContacts(text: string): ContactInput[] {
         .replace(/[<,;"']/g, " ")
         .replace(/\s+/g, " ")
         .trim();
-      contacts.push({ email, name: name || null });
+      contacts.push({ email, name: name || null, phone: findPhoneInText(line) });
+      foundInLine = true;
+    }
+    if (!foundInLine) {
+      ignoredRows += 1;
     }
   }
-  return contacts;
+  return { contacts, scanned: lines.length, ignoredRows };
+}
+
+function findPhoneInText(text: string): string | null {
+  return text.match(/\+?\d[\d\s().-]{6,}\d/)?.[0]?.trim() ?? null;
 }
 
 function parseCsvLine(line: string): string[] {

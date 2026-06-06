@@ -15,6 +15,7 @@ import {
 } from "./cloudflare";
 import {
   archiveThread,
+  deleteContact,
   deleteExternalAccount,
   deleteThread,
   getAttachmentById,
@@ -232,14 +233,35 @@ export async function handleApi(
       return methodNotAllowed();
     }
 
+    const contactMatch = url.pathname.match(/^\/api\/contacts\/(?!import$)([^/]+)$/);
+    if (contactMatch) {
+      if (request.method === "PUT") {
+        const body = await readJson(request);
+        const contact = await upsertContact(env, {
+          ...readContactInput(body, "manual"),
+          id: contactMatch[1]
+        });
+        ctx.waitUntil(recordAudit(env, "contact.saved", contact.id, { email: contact.email }));
+        return json({ ok: true, contact });
+      }
+
+      if (request.method === "DELETE") {
+        await deleteContact(env, contactMatch[1]);
+        ctx.waitUntil(recordAudit(env, "contact.deleted", contactMatch[1], {}));
+        return json({ ok: true });
+      }
+
+      return methodNotAllowed();
+    }
+
     if (url.pathname === "/api/contacts/import") {
       if (request.method !== "POST") return methodNotAllowed();
       const body = await readJson(request);
       const source = optionalString(body, "source", { max: 32 }) ?? "upload";
       const contacts = readContactList(body);
-      const imported = await importContacts(env, contacts, source);
-      ctx.waitUntil(recordAudit(env, "contacts.imported", null, { imported, source }));
-      return json({ ok: true, imported }, { status: 201 });
+      const report = await importContacts(env, contacts, source);
+      ctx.waitUntil(recordAudit(env, "contacts.imported", null, { imported: report.imported, skipped: report.skipped, source }));
+      return json({ ok: true, report }, { status: 201 });
     }
 
     if (url.pathname === "/api/external-accounts") {
@@ -522,11 +544,12 @@ async function seedDevelopmentData(env: RuntimeEnv): Promise<number> {
 function readContactInput(
   body: Record<string, unknown>,
   source: string
-): { email: string; name: string | null; company: string | null; tags: string | null; notes: string | null; source: string } {
+): { email: string; name: string | null; company: string | null; phone: string | null; tags: string | null; notes: string | null; source: string } {
   return {
     email: requiredString(body, "email", { max: 320 }),
     name: optionalString(body, "name", { max: 160 }),
     company: optionalString(body, "company", { max: 160 }),
+    phone: optionalString(body, "phone", { max: 80 }),
     tags: optionalString(body, "tags", { max: 300 }),
     notes: optionalString(body, "notes", { max: 2000 }),
     source
@@ -623,7 +646,7 @@ function optionalPort(body: Record<string, unknown>, field: string): number | nu
 
 function readContactList(
   body: Record<string, unknown>
-): { email: string; name: string | null; company: string | null; tags: string | null; notes: string | null }[] {
+): { email: string; name: string | null; company: string | null; phone: string | null; tags: string | null; notes: string | null }[] {
   const value = body.contacts;
   if (!Array.isArray(value)) {
     throw new ApiError(400, "invalid_contacts", "contacts must be an array");

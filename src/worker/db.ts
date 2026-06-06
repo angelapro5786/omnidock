@@ -74,11 +74,24 @@ export type ContactRow = {
   email: string;
   name: string | null;
   company: string | null;
+  phone: string | null;
   tags: string | null;
   notes: string | null;
   source: string;
   created_at: string;
   updated_at: string;
+};
+
+export type ContactImportReport = {
+  imported: number;
+  created: number;
+  updated: number;
+  skipped: number;
+  rows: {
+    email: string;
+    status: "created" | "updated" | "skipped";
+    message?: string;
+  }[];
 };
 
 export type MailboxSignatureRow = {
@@ -336,30 +349,61 @@ export async function deleteExternalAccount(env: RuntimeEnv, id: string): Promis
 export async function upsertContact(
   env: RuntimeEnv,
   input: {
+    id?: string | null;
     email: string;
     name?: string | null;
     company?: string | null;
+    phone?: string | null;
     tags?: string | null;
     notes?: string | null;
     source?: string;
   }
 ): Promise<ContactRow> {
+  return (await saveContact(env, input)).contact;
+}
+
+async function saveContact(
+  env: RuntimeEnv,
+  input: {
+    id?: string | null;
+    email: string;
+    name?: string | null;
+    company?: string | null;
+    phone?: string | null;
+    tags?: string | null;
+    notes?: string | null;
+    source?: string;
+  }
+): Promise<{ contact: ContactRow; status: "created" | "updated" }> {
   const email = normalizeEmail(input.email);
-  const existing = await env.DB.prepare("SELECT * FROM contacts WHERE email = ?")
+  const existingById = input.id
+    ? await env.DB.prepare("SELECT * FROM contacts WHERE id = ?").bind(input.id).first<ContactRow>()
+    : null;
+
+  if (input.id && !existingById) {
+    throw new ApiError(404, "contact_not_found", "Contact not found");
+  }
+
+  const existingByEmail = await env.DB.prepare("SELECT * FROM contacts WHERE email = ?")
     .bind(email)
     .first<ContactRow>();
+  if (existingByEmail && existingById && existingByEmail.id !== existingById.id) {
+    throw new ApiError(409, "contact_exists", "Contact email already exists");
+  }
+  const existing = existingById ?? existingByEmail;
 
   if (!existing) {
     const id = createId("con");
     await env.DB.prepare(
-      `INSERT INTO contacts (id, email, name, company, tags, notes, source)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO contacts (id, email, name, company, phone, tags, notes, source)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     )
       .bind(
         id,
         email,
         nullableText(input.name),
         nullableText(input.company),
+        nullableText(input.phone),
         nullableText(input.tags),
         nullableText(input.notes),
         input.source ?? "manual"
@@ -372,17 +416,19 @@ export async function upsertContact(
     if (!created) {
       throw new ApiError(500, "contact_insert_failed", "Contact could not be created");
     }
-    return created;
+    return { contact: created, status: "created" };
   }
 
   await env.DB.prepare(
     `UPDATE contacts
-     SET name = ?, company = ?, tags = ?, notes = ?, source = ?, updated_at = CURRENT_TIMESTAMP
+     SET email = ?, name = ?, company = ?, phone = ?, tags = ?, notes = ?, source = ?, updated_at = CURRENT_TIMESTAMP
      WHERE id = ?`
   )
     .bind(
+      email,
       nullableText(input.name) ?? existing.name,
       nullableText(input.company) ?? existing.company,
+      nullableText(input.phone) ?? existing.phone,
       nullableText(input.tags) ?? existing.tags,
       nullableText(input.notes) ?? existing.notes,
       input.source ?? existing.source,
@@ -396,7 +442,14 @@ export async function upsertContact(
   if (!updated) {
     throw new ApiError(500, "contact_update_failed", "Contact could not be updated");
   }
-  return updated;
+  return { contact: updated, status: "updated" };
+}
+
+export async function deleteContact(env: RuntimeEnv, id: string): Promise<void> {
+  const result = await env.DB.prepare("DELETE FROM contacts WHERE id = ?").bind(id).run();
+  if (result.meta.changes === 0) {
+    throw new ApiError(404, "contact_not_found", "Contact not found");
+  }
 }
 
 export async function importContacts(
@@ -405,17 +458,35 @@ export async function importContacts(
     email: string;
     name?: string | null;
     company?: string | null;
+    phone?: string | null;
     tags?: string | null;
     notes?: string | null;
   }[],
   source = "upload"
-): Promise<number> {
-  let count = 0;
+): Promise<ContactImportReport> {
+  const report: ContactImportReport = {
+    imported: 0,
+    created: 0,
+    updated: 0,
+    skipped: 0,
+    rows: []
+  };
   for (const contact of contacts.slice(0, 1000)) {
-    await upsertContact(env, { ...contact, source });
-    count += 1;
+    try {
+      const saved = await saveContact(env, { ...contact, source });
+      report.imported += 1;
+      report[saved.status] += 1;
+      report.rows.push({ email: saved.contact.email, status: saved.status });
+    } catch (error) {
+      report.skipped += 1;
+      report.rows.push({
+        email: contact.email,
+        status: "skipped",
+        message: error instanceof Error ? error.message : "Could not import contact"
+      });
+    }
   }
-  return count;
+  return report;
 }
 
 export async function listMailboxSignatures(env: RuntimeEnv): Promise<MailboxSignatureRow[]> {

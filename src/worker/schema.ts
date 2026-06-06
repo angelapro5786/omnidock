@@ -7,7 +7,8 @@ const CURRENT_MIGRATIONS = [
   "0004_contacts_signatures.sql",
   "0005_default_domain.sql",
   "0006_admin_profile_reset.sql",
-  "0007_external_accounts.sql"
+  "0007_external_accounts.sql",
+  "0008_contact_phone.sql"
 ];
 
 let schemaReady: Promise<void> | null = null;
@@ -48,6 +49,10 @@ async function applyDatabaseSchema(env: RuntimeEnv): Promise<void> {
     reset_expires_at: "TEXT"
   });
 
+  await addMissingColumns(env, "contacts", {
+    phone: "TEXT"
+  });
+
   for (const statement of indexStatements) {
     await env.DB.prepare(statement).run();
   }
@@ -59,7 +64,7 @@ async function applyDatabaseSchema(env: RuntimeEnv): Promise<void> {
 
 async function addMissingColumns(
   env: RuntimeEnv,
-  table: "admin_auth" | "domains" | "mailboxes",
+  table: "admin_auth" | "contacts" | "domains" | "mailboxes",
   columns: Record<string, string>
 ): Promise<void> {
   const result = await env.DB.prepare(`PRAGMA table_info(${table})`).all<TableInfoRow>();
@@ -162,10 +167,11 @@ const schemaStatements = [
   )`,
   `CREATE TABLE IF NOT EXISTS contacts (
     id TEXT PRIMARY KEY,
-    email TEXT NOT NULL UNIQUE,
-    name TEXT,
-    company TEXT,
-    tags TEXT,
+	    email TEXT NOT NULL UNIQUE,
+	    name TEXT,
+	    company TEXT,
+	    phone TEXT,
+	    tags TEXT,
     notes TEXT,
     source TEXT NOT NULL DEFAULT 'manual',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

@@ -306,7 +306,7 @@ button:hover:not(:disabled) {
   text-transform: uppercase;
 }
 
-.mailbox-switcher select {
+.mailbox-switcher .custom-select-trigger {
   width: 100%;
   height: 34px;
   border: 1px solid var(--line-strong);
@@ -455,7 +455,7 @@ button:hover:not(:disabled) {
   min-width: 0;
 }
 
-.search-scope select {
+.search-scope .custom-select-trigger {
   width: 100%;
   height: 42px;
   border: 1px solid var(--line);
@@ -575,6 +575,96 @@ button:hover:not(:disabled) {
   width: 13px;
   height: 13px;
   border-radius: 1px;
+}
+
+.custom-select {
+  position: relative;
+  min-width: 0;
+}
+
+.custom-select-trigger {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--control);
+  color: var(--text);
+  padding: 0 10px;
+  text-align: left;
+  box-shadow: inset 0 1px 1px rgba(10, 20, 30, 0.05);
+}
+
+.custom-select-trigger span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.custom-select.open .custom-select-trigger,
+.custom-select-trigger:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.custom-select-menu {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  z-index: 80;
+  display: grid;
+  gap: 3px;
+  width: max(100%, 230px);
+  max-height: 260px;
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.custom-select-option {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.custom-select-option span,
+.custom-select-option small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.custom-select-option small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font: 11px/1.2 var(--mono);
+}
+
+.custom-select-option.active {
+  border-color: var(--selected-line);
+  background: var(--selected);
+  color: var(--accent-strong);
+}
+
+.custom-select-option:hover {
+  border-color: var(--hover-line);
+  background: var(--hover-bg);
+  color: var(--hover-text);
 }
 
 .button,
@@ -753,8 +843,8 @@ button:hover:not(:disabled) {
 .inline-input input,
 .text-input,
 .compose-modal input,
-.compose-modal select,
-.reply-tools select {
+.compose-modal .custom-select-trigger,
+.reply-tools .custom-select-trigger {
   width: 100%;
   height: 34px;
   border: 1px solid var(--line);
@@ -768,9 +858,6 @@ button:hover:not(:disabled) {
 .inline-input input:focus,
 .text-input:focus,
 .compose-modal input:focus,
-.mailbox-switcher select:focus,
-.reply-tools select:focus,
-.search-scope select:focus,
 .search-wrap:focus-within,
 .reply-box textarea:focus,
 .compose-modal textarea:focus {
@@ -842,6 +929,10 @@ button:hover:not(:disabled) {
 
 .settings-grid {
   grid-template-columns: minmax(280px, 360px) minmax(260px, 320px) minmax(360px, 1fr);
+}
+
+.contacts-grid {
+  grid-template-columns: minmax(310px, 380px) minmax(280px, 360px) minmax(460px, 1fr);
 }
 
 .signature-grid {
@@ -1191,6 +1282,44 @@ button:hover:not(:disabled) {
   grid-template-columns: 18px minmax(0, 1fr) auto;
 }
 
+.contact-row.active {
+  border-left: 3px solid var(--accent);
+  background: var(--selected);
+  color: var(--accent-strong);
+}
+
+.contact-row small {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+  color: var(--muted);
+  font: 11px/1.2 var(--mono);
+}
+
+.contact-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.import-log {
+  display: grid;
+  gap: 4px;
+  max-height: 180px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--control);
+  color: var(--muted);
+  font: 11px/1.35 var(--mono);
+}
+
+.import-log span {
+  overflow-wrap: anywhere;
+}
+
 .signature-mailbox {
   grid-template-columns: 18px minmax(0, 1fr) auto;
 }
@@ -1491,12 +1620,89 @@ button:hover:not(:disabled) {
   text-transform: uppercase;
 }
 
-.message pre {
+.message-text,
+.message-html {
   margin: 12px 0 0;
   overflow: auto;
   white-space: pre-wrap;
   color: var(--text);
-  font: 13px/1.55 var(--mono);
+  font: 13px/1.55 var(--body);
+}
+
+.message-text {
+  font-family: var(--mono);
+}
+
+.message-html a,
+.message-text a {
+  color: var(--accent-strong);
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+.rich-editor {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--control);
+}
+
+.rich-editor:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.rich-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 5px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-alt);
+}
+
+.rich-color-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: linear-gradient(var(--control-hover), var(--control));
+  color: var(--text);
+  cursor: pointer;
+}
+
+.rich-color-button:hover {
+  border-color: var(--hover-line);
+  background: var(--hover-bg);
+  color: var(--hover-text);
+}
+
+.rich-color-button input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.rich-editor-surface {
+  min-height: 126px;
+  max-height: 260px;
+  overflow: auto;
+  padding: 10px;
+  color: var(--text);
+  outline: none;
+  line-height: 1.55;
+}
+
+.rich-editor-surface:empty::before {
+  color: var(--muted);
+  content: attr(data-placeholder);
 }
 
 .attachment-strip {
@@ -1913,7 +2119,7 @@ button:hover:not(:disabled) {
 .compose-modal {
   display: grid;
   gap: 12px;
-  width: min(620px, 100%);
+  width: min(720px, 100%);
   padding: 14px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
