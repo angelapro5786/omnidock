@@ -13,6 +13,8 @@
     "directory": "./dist/client"
   },
   "vars": {
+    // Required for one-click deploy. Replace example.com in the Deploy to Cloudflare setup form.
+    "PRIMARY_DOMAIN": "example.com",
     // Optional. Leave empty for workers.dev. Set to a custom dashboard host such as "mail.example.com".
     "MANAGEMENT_HOST": "",
     // Optional. Leave empty when the API token can access exactly one Cloudflare account.
@@ -20,6 +22,9 @@
     // Optional. Verified sender address for password reset emails. Defaults to the admin email.
     "PASSWORD_RESET_FROM": "",
     "WORKER_SCRIPT_NAME": "emailfox"
+  },
+  "secrets": {
+    "required": ["CLOUDFLARE_API_TOKEN"]
   },
   "d1_databases": [
     {
