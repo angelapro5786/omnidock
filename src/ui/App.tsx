@@ -2888,6 +2888,7 @@ function ThreadDetail({
   const lastInbound = [...(thread?.messages ?? [])].reverse().find((message) => message.direction === "inbound");
   const sendableMailboxes = useMemo(() => mailboxes.filter((mailbox) => mailbox.enabled === 1), [mailboxes]);
   const preferredFrom = firstMessage?.mailbox ?? sendableMailboxes[0]?.address ?? "";
+  const isArchived = Boolean(firstMessage?.archived_at);
 
   useEffect(() => {
     if (preferredFrom && sendableMailboxes.some((mailbox) => mailbox.address === preferredFrom)) {
@@ -2950,7 +2951,7 @@ function ThreadDetail({
 
   async function patchArchive() {
     if (!api || !firstMessage) return;
-    const action = folder === "archive" ? "unarchive" : "archive";
+    const action = isArchived ? "unarchive" : "archive";
     setBusyAction(action);
     try {
       await api.patchThread(firstMessage.thread_id, action);
@@ -2989,7 +2990,7 @@ function ThreadDetail({
         <div className="detail-actions">
           <button className="button ghost" onClick={() => void patchArchive()} disabled={busyAction !== null}>
             <Archive size={16} />
-            {folder === "archive" ? "Unarchive" : "Archive"}
+            {isArchived ? "Unarchive" : "Archive"}
           </button>
           <button className="button danger" onClick={() => void deleteCurrentThread()} disabled={busyAction !== null}>
             <Trash2 size={16} />
@@ -3008,17 +3009,17 @@ function ThreadDetail({
               </div>
               <time>{formatDate(message.created_at)}</time>
             </header>
-	            {message.html_body ? (
-	              <div
-	                className="message-html"
-	                dangerouslySetInnerHTML={{ __html: sanitizeEmailHtml(message.html_body) }}
-	              />
-	            ) : (
-	              <div
-	                className="message-text"
-	                dangerouslySetInnerHTML={{ __html: textToHtmlWithLinks(message.text_body || message.snippet || "No text body") }}
-	              />
-	            )}
+            {message.html_body ? (
+              <div
+                className="message-html"
+                dangerouslySetInnerHTML={{ __html: sanitizeEmailHtml(message.html_body) }}
+              />
+            ) : (
+              <div
+                className="message-text"
+                dangerouslySetInnerHTML={{ __html: textToHtmlWithLinks(message.text_body || message.snippet || "No text body") }}
+              />
+            )}
             {thread.attachments.filter((attachment) => attachment.message_id === message.id).length > 0 ? (
               <div className="attachment-strip">
                 {thread.attachments
@@ -3044,11 +3045,11 @@ function ThreadDetail({
         <div className="reply-tools">
           <label>
             From
-	            <CustomSelect
-	              value={from}
-	              onChange={setFrom}
-	              options={sendableMailboxes.map((mailbox) => ({ value: mailbox.address, label: mailbox.address }))}
-	            />
+            <CustomSelect
+              value={from}
+              onChange={setFrom}
+              options={sendableMailboxes.map((mailbox) => ({ value: mailbox.address, label: mailbox.address }))}
+            />
           </label>
           <span>
             <Reply size={14} />
@@ -3061,7 +3062,7 @@ function ThreadDetail({
             <span>{replyError}</span>
           </div>
         ) : null}
-	        <RichTextEditor value={replyDraft} onChange={setReplyDraft} placeholder="Reply" />
+        <RichTextEditor value={replyDraft} onChange={setReplyDraft} placeholder="Reply" />
         <AttachmentPicker
           value={replyAttachments}
           onChange={setReplyAttachments}
@@ -3072,9 +3073,9 @@ function ThreadDetail({
           className="button primary send-button"
           type="submit"
           disabled={
-	            busyAction !== null ||
-	            replyAttachmentsLoading ||
-	            (!replyDraft.text.trim() && replyAttachments.length === 0) ||
+            busyAction !== null ||
+            replyAttachmentsLoading ||
+            (!replyDraft.text.trim() && replyAttachments.length === 0) ||
             !from
           }
         >
@@ -3120,6 +3121,18 @@ function ComposeDialog({
   const [attachmentsLoading, setAttachmentsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [toFocused, setToFocused] = useState(false);
+  const contactQuery = currentAddressNeedle(to);
+  const contactSuggestions = useMemo(
+    () =>
+      contactQuery
+        ? contacts
+            .filter((contact) => contactMatchesQuery(contact, contactQuery))
+            .filter((contact) => !addressListContains(to, contact.email))
+            .slice(0, 6)
+        : [],
+    [contactQuery, contacts, to]
+  );
 
   useEffect(() => {
     if (!from || !sendableMailboxes.some((mailbox) => mailbox.address === from)) {
@@ -3157,43 +3170,53 @@ function ComposeDialog({
             <span>{error}</span>
           </div>
         ) : null}
-	        <label>
-	          From
-	          <CustomSelect
-	            value={from}
-	            onChange={setFrom}
-	            options={sendableMailboxes.map((mailbox) => ({ value: mailbox.address, label: mailbox.address }))}
-	          />
-	        </label>
+        <label>
+          From
+          <CustomSelect
+            value={from}
+            onChange={setFrom}
+            options={sendableMailboxes.map((mailbox) => ({ value: mailbox.address, label: mailbox.address }))}
+          />
+        </label>
         <label>
           To
-          <input value={to} onChange={(event) => setTo(event.target.value)} placeholder="ops@example.com" />
+          <div className="to-field">
+            <input
+              value={to}
+              onBlur={() => window.setTimeout(() => setToFocused(false), 120)}
+              onChange={(event) => setTo(event.target.value)}
+              onFocus={() => setToFocused(true)}
+              placeholder="ops@example.com"
+            />
+            {toFocused && contactSuggestions.length > 0 ? (
+              <div className="contact-suggestions" role="listbox">
+                {contactSuggestions.map((contact) => (
+                  <button
+                    key={contact.id}
+                    type="button"
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      setTo((current) => replaceCurrentAddressToken(current, contact.email));
+                      setToFocused(false);
+                    }}
+                  >
+                    <Users size={14} />
+                    <span>
+                      <strong>{contact.name || contact.email}</strong>
+                      <small>{contact.email}</small>
+                    </span>
+                    {contact.phone || contact.company ? <b>{contact.phone ?? contact.company}</b> : null}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
         </label>
-        {contacts.length > 0 ? (
-	          <label>
-	            Contacts
-	            <CustomSelect
-	              value=""
-	              onChange={(email) => {
-	                if (!email) return;
-	                setTo((current) => appendAddress(current, email));
-	              }}
-	              options={[
-	                { value: "", label: "Select contact" },
-	                ...contacts.map((contact) => ({
-	                  value: contact.email,
-	                  label: contact.name ? `${contact.name} <${contact.email}>` : contact.email,
-	                  description: contact.phone ?? contact.company ?? undefined
-	                }))
-	              ]}
-	            />
-	          </label>
-	        ) : null}
         <label>
           Subject
           <input value={subject} onChange={(event) => setSubject(event.target.value)} />
         </label>
-	        <RichTextEditor value={draft} onChange={setDraft} placeholder="Message" />
+        <RichTextEditor value={draft} onChange={setDraft} placeholder="Message" />
         <AttachmentPicker
           value={attachments}
           onChange={setAttachments}
@@ -3536,15 +3559,36 @@ function isAuthError(error: unknown): boolean {
   return error instanceof ApiRequestError && (error.status === 401 || error.status === 403);
 }
 
-function appendAddress(current: string, email: string): string {
-  const values = current
+function currentAddressNeedle(value: string): string {
+  const token = value.split(/[,\n;]/).pop() ?? "";
+  return token.replace(/[<>"']/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function addressListContains(value: string, email: string): boolean {
+  const normalized = email.toLowerCase();
+  return value
     .split(/[,\n;]/)
     .map((item) => item.trim().toLowerCase())
-    .filter(Boolean);
-  if (values.includes(email.toLowerCase())) {
-    return current;
+    .filter(Boolean)
+    .includes(normalized);
+}
+
+function replaceCurrentAddressToken(value: string, email: string): string {
+  if (addressListContains(value, email)) {
+    return value;
   }
-  return values.length > 0 ? `${current.trim()}, ${email}` : email;
+
+  const lastSeparator = Math.max(value.lastIndexOf(","), value.lastIndexOf(";"), value.lastIndexOf("\n"));
+  const prefix = lastSeparator >= 0 ? `${value.slice(0, lastSeparator + 1).trimEnd()} ` : "";
+  return `${prefix}${email}, `;
+}
+
+function contactMatchesQuery(contact: ContactRow, query: string): boolean {
+  const haystack = [contact.email, contact.name, contact.company, contact.phone, contact.tags]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(query);
 }
 
 function fileToBase64(file: File): Promise<string> {

@@ -1758,6 +1758,15 @@ button:hover:not(:disabled) {
   cursor: pointer;
 }
 
+.attachment-add svg,
+.attachment-add span {
+  flex: 0 0 auto;
+}
+
+.attachment-add span {
+  line-height: 1;
+}
+
 .attachment-add input {
   display: none;
 }
@@ -2252,6 +2261,80 @@ button:hover:not(:disabled) {
 .compose-modal label {
   display: grid;
   gap: 6px;
+}
+
+.compose-modal label.attachment-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: start;
+  gap: 8px;
+  height: 38px;
+  min-height: 38px;
+  padding: 0 12px;
+}
+
+.to-field {
+  position: relative;
+  display: grid;
+  gap: 6px;
+}
+
+.contact-suggestions {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  right: 0;
+  z-index: 90;
+  display: grid;
+  gap: 3px;
+  max-height: 240px;
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.contact-suggestions button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.contact-suggestions button:hover {
+  border-color: var(--hover-line);
+  background: var(--hover-bg);
+  color: var(--hover-text);
+}
+
+.contact-suggestions span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.contact-suggestions strong,
+.contact-suggestions small,
+.contact-suggestions b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contact-suggestions small,
+.contact-suggestions b {
+  color: var(--muted);
+  font: 11px/1.2 var(--mono);
 }
 
 .statusbar {

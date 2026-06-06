@@ -874,15 +874,18 @@ export async function listThreads(
 ): Promise<ThreadRow[]> {
   const filters: string[] = [];
   const params: unknown[] = [];
+  const searchTerm = options.query?.trim();
 
-  if (options.folder === "sent") {
-    filters.push("m.direction = 'outbound'");
-    filters.push("m.archived_at IS NULL");
-  } else if (options.folder === "archive") {
-    filters.push("m.archived_at IS NOT NULL");
-  } else {
-    filters.push("m.direction = 'inbound'");
-    filters.push("m.archived_at IS NULL");
+  if (!searchTerm) {
+    if (options.folder === "sent") {
+      filters.push("m.direction = 'outbound'");
+      filters.push("m.archived_at IS NULL");
+    } else if (options.folder === "archive") {
+      filters.push("m.archived_at IS NOT NULL");
+    } else {
+      filters.push("m.direction = 'inbound'");
+      filters.push("m.archived_at IS NULL");
+    }
   }
 
   if (options.domainId) {
@@ -901,28 +904,28 @@ export async function listThreads(
     }
   }
 
-  const searchTerm = options.query?.trim();
   if (searchTerm) {
-    const like = `%${searchTerm}%`;
+    const like = `%${searchTerm.toLowerCase()}%`;
     filters.push(
       `EXISTS (
         SELECT 1 FROM messages q
         WHERE q.thread_id = m.thread_id
           AND (
-            q.subject LIKE ?
-            OR q.from_address LIKE ?
-            OR q.to_json LIKE ?
-            OR q.cc_json LIKE ?
-            OR q.bcc_json LIKE ?
-            OR q.snippet LIKE ?
-            OR q.text_body LIKE ?
-            OR q.html_body LIKE ?
-            OR q.mailbox LIKE ?
-            OR q.domain LIKE ?
+            lower(COALESCE(q.subject, '')) LIKE ?
+            OR lower(COALESCE(q.from_address, '')) LIKE ?
+            OR lower(COALESCE(q.from_name, '')) LIKE ?
+            OR lower(COALESCE(q.to_json, '')) LIKE ?
+            OR lower(COALESCE(q.cc_json, '')) LIKE ?
+            OR lower(COALESCE(q.bcc_json, '')) LIKE ?
+            OR lower(COALESCE(q.snippet, '')) LIKE ?
+            OR lower(COALESCE(q.text_body, '')) LIKE ?
+            OR lower(COALESCE(q.html_body, '')) LIKE ?
+            OR lower(COALESCE(q.mailbox, '')) LIKE ?
+            OR lower(COALESCE(q.domain, '')) LIKE ?
           )
       )`
     );
-    params.push(like, like, like, like, like, like, like, like, like, like);
+    params.push(like, like, like, like, like, like, like, like, like, like, like);
   }
 
   const where = filters.length > 0 ? filters.join(" AND ") : "1 = 1";
