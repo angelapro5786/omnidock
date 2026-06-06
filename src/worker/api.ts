@@ -723,7 +723,7 @@ async function searchBucketObjects(env: RuntimeEnv, url: URL) {
   const includeText = url.searchParams.get("text") === "1";
   const scope = url.searchParams.get("scope") === "all" ? "all" : "bucket";
   const bucketId = url.searchParams.get("bucketId")?.trim() || "mail";
-  const queryLower = query.toLowerCase();
+  const normalizedQuery = normalizeSearchText(query);
   const bucketBindings =
     scope === "all"
       ? listAvailableBuckets(env)
@@ -754,9 +754,9 @@ async function searchBucketObjects(env: RuntimeEnv, url: URL) {
 
       for (const object of page.objects) {
         scanned += 1;
-        const keyLower = object.key.toLowerCase();
-        const nameLower = filenameFromR2Key(object.key).toLowerCase();
-        const pathMatches = keyLower.includes(queryLower) || nameLower.includes(queryLower);
+        const keySearch = normalizeSearchText(object.key);
+        const nameSearch = normalizeSearchText(filenameFromR2Key(object.key));
+        const pathMatches = keySearch.includes(normalizedQuery) || nameSearch.includes(normalizedQuery);
         let contentSnippet: string | null = null;
 
         if (
@@ -767,7 +767,7 @@ async function searchBucketObjects(env: RuntimeEnv, url: URL) {
           isTextSearchCandidate(object)
         ) {
           contentScanned += 1;
-          contentSnippet = await findTextMatch(bucket.bucket, object.key, queryLower);
+          contentSnippet = await findTextMatch(bucket.bucket, object.key, normalizedQuery);
         }
 
         if (pathMatches || contentSnippet) {
@@ -810,18 +810,27 @@ async function searchBucketObjects(env: RuntimeEnv, url: URL) {
   };
 }
 
-async function findTextMatch(bucket: R2Bucket, key: string, queryLower: string): Promise<string | null> {
+async function findTextMatch(bucket: R2Bucket, key: string, normalizedQuery: string): Promise<string | null> {
   const object = await bucket.get(key);
   if (!object) return null;
   const text = await object.text();
-  const textLower = text.toLowerCase();
-  const index = textLower.indexOf(queryLower);
+  const normalizedText = normalizeSearchText(text);
+  const index = normalizedText.indexOf(normalizedQuery);
   if (index < 0) return null;
   const start = Math.max(0, index - 80);
-  const end = Math.min(text.length, index + queryLower.length + 120);
+  const end = Math.min(text.length, index + normalizedQuery.length + 120);
   const prefix = start > 0 ? "..." : "";
   const suffix = end < text.length ? "..." : "";
   return `${prefix}${text.slice(start, end).replace(/\s+/g, " ").trim()}${suffix}`;
+}
+
+function normalizeSearchText(value: string): string {
+  return value
+    .replace(/İ/g, "I")
+    .replace(/ı/g, "i")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
 }
 
 function isTextSearchCandidate(object: R2Object): boolean {

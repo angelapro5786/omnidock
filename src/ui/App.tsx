@@ -1540,8 +1540,8 @@ function AuthGate({
           </div>
         </div>
         <div className={error ? "login-error" : "auth-check"}>
-          {error ? <AlertTriangle size={15} /> : <ShieldCheck size={15} />}
-          <span>{error ?? "Checking password"}</span>
+          {error ? <AlertTriangle size={15} /> : <Loader2 className="spin-icon" size={15} />}
+          <span>{error ?? "Opening workspace"}</span>
         </div>
         <button className="button ghost wide" type="button" onClick={onLock}>
           Lock
@@ -3207,7 +3207,6 @@ function BucketsView({
     <section className="bucket-shell">
       <div className="bucket-toolbar">
         <div className="bucket-current bucket-select" title={activeBucket?.description ?? "R2 bucket"}>
-          <span>Bucket</span>
           <CustomSelect
             value={activeBucket?.id ?? bucketOptions[0]?.value ?? ""}
             onChange={(value) => onBucketChange(value || null)}

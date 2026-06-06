@@ -1020,7 +1020,7 @@ button:hover:not(:disabled) {
   grid-template-columns: minmax(220px, 360px) minmax(420px, 1fr) auto;
   align-items: center;
   gap: 12px;
-  min-height: 54px;
+  min-height: 52px;
   padding: 8px 10px;
 }
 
@@ -1045,7 +1045,7 @@ button:hover:not(:disabled) {
 }
 
 .bucket-select .custom-select-trigger {
-  height: 34px;
+  height: 36px;
   border-color: var(--line-strong);
   background: linear-gradient(var(--control-hover), var(--control));
   font: 12px/1 var(--mono);
@@ -1068,7 +1068,7 @@ button:hover:not(:disabled) {
   grid-template-columns: 18px minmax(0, 1fr);
   align-items: center;
   gap: 7px;
-  height: 34px;
+  height: 36px;
   min-width: 0;
   padding: 0 10px;
   border: 1px solid var(--line-strong);
@@ -1088,7 +1088,7 @@ button:hover:not(:disabled) {
 
 .bucket-search-scope .custom-select-trigger,
 .bucket-searchbar .button {
-  height: 34px;
+  height: 36px;
 }
 
 .bucket-search-scope .custom-select-menu {
@@ -1099,6 +1099,10 @@ button:hover:not(:disabled) {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+}
+
+.bucket-actions .button {
+  height: 36px;
 }
 
 .file-button {
@@ -2975,6 +2979,10 @@ button:hover:not(:disabled) {
   to {
     transform: rotate(360deg);
   }
+}
+
+.spin-icon {
+  animation: spin 0.9s linear infinite;
 }
 
 @media (max-width: 1180px) {
