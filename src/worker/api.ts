@@ -429,7 +429,7 @@ function publicOrigin(request: Request, env: RuntimeEnv): string {
 }
 
 function configuredPrimaryDomain(env: RuntimeEnv): string | null {
-  const domain = env.PRIMARY_DOMAIN?.trim();
+  const domain = (env.DOMAINS?.split(",")[0] ?? env.PRIMARY_DOMAIN ?? "").trim();
   if (!domain || domain.toLowerCase() === "example.com") {
     return null;
   }

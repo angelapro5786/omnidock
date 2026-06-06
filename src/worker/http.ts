@@ -1,6 +1,7 @@
 export type RuntimeEnv = Env & {
   ADMIN_PASSWORD_BOOTSTRAP?: string;
   CLOUDFLARE_API_TOKEN?: string;
+  DOMAINS?: string;
   ENABLE_DEV_SEED?: string;
   PRIMARY_DOMAIN?: string;
   PASSWORD_RESET_FROM?: string;

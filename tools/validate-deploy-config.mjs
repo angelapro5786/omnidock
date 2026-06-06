@@ -1,6 +1,7 @@
 import fs from "node:fs";
 
 const SKIP_FLAG = "EMAILFOX_SKIP_CONFIG_CHECK";
+const PLACEHOLDER_D1_ID = "00000000-0000-0000-0000-000000000000";
 
 if (process.env[SKIP_FLAG] === "1") {
   process.exit(0);
@@ -9,14 +10,19 @@ if (process.env[SKIP_FLAG] === "1") {
 const config = readJsonc("wrangler.jsonc");
 const failures = [];
 
-const primaryDomain = String(config.vars?.PRIMARY_DOMAIN ?? "").trim().toLowerCase();
-if (!primaryDomain || primaryDomain === "example.com" || primaryDomain.endsWith(".example.com")) {
-  failures.push("Set vars.PRIMARY_DOMAIN to your real first email domain before building.");
+const domains = String(config.vars?.DOMAINS ?? config.vars?.PRIMARY_DOMAIN ?? "")
+  .trim()
+  .toLowerCase();
+if (!domains || domains.split(",").some((domain) => domain.trim() === "example.com")) {
+  failures.push("Set vars.DOMAINS to your real first email domain before building.");
 }
 
 const d1 = Array.isArray(config.d1_databases) ? config.d1_databases.find((item) => item.binding === "DB") : null;
 if (!d1?.database_name) {
   failures.push("Set d1_databases binding DB with a database_name so Cloudflare can create or reuse D1.");
+}
+if (!d1?.database_id || d1.database_id === PLACEHOLDER_D1_ID) {
+  failures.push("Select or create the D1 database during deploy so DB.database_id is not the placeholder UUID.");
 }
 
 const r2 = Array.isArray(config.r2_buckets) ? config.r2_buckets.find((item) => item.binding === "MAIL_BUCKET") : null;

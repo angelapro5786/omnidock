@@ -23,6 +23,8 @@ Emailfox is not an IMAP/POP3 server and does not replace a full mailbox provider
 
 Click the button at the top of this README and follow Cloudflare's setup flow.
 
+Use the Deploy to Cloudflare button flow for first installs. Importing the Git repository manually from Workers & Pages may skip the resource wizard; in that case the build will stop until `DOMAINS`, D1, and R2 are configured.
+
 Cloudflare's Deploy to Cloudflare flow will:
 
 1. Clone this public repository into your own GitHub or GitLab account.
@@ -130,7 +132,7 @@ You will be asked to configure:
 
 | Value | Required | Notes |
 | --- | --- | --- |
-| `PRIMARY_DOMAIN` | Yes | Main email domain for first setup. Replace the `example.com` placeholder before build. |
+| `DOMAINS` | Yes | Main email domain for first setup. Replace the `example.com` placeholder before build. |
 | `CLOUDFLARE_API_TOKEN` | Yes | Used for Cloudflare sync and routing rule creation. |
 | `ADMIN_PASSWORD_BOOTSTRAP` | No | Legacy/automation fallback. Leave blank for normal first-screen admin creation. |
 | `MANAGEMENT_HOST` | No | Leave blank for the generated `workers.dev` host. Set later for a custom domain. |
@@ -148,13 +150,13 @@ Use Cloudflare secrets for:
 
 Use plain Worker vars only for non-secret values:
 
-- `PRIMARY_DOMAIN`
+- `DOMAINS`
 - `MANAGEMENT_HOST`
 - `CLOUDFLARE_ACCOUNT_ID`
 - `PASSWORD_RESET_FROM`
 - `WORKER_SCRIPT_NAME`
 
-`database_id` is not a Worker secret, but it is account-specific. For the public template, leave it out so one-click deploy can provision the deployer's own D1 database and write the generated ID into that deployer's copied repository. For a private/manual deployment, add the deployer's own `database_id` locally or through the deploy platform configuration, never as a committed personal value.
+`database_id` is not a Worker secret, but it is account-specific. The public template uses the placeholder `00000000-0000-0000-0000-000000000000` so the Deploy to Cloudflare resource step can replace it with the deployer's own generated D1 database id. Installed copies must keep that generated `database_id` for updates. For a private/manual deployment, add the deployer's own `database_id` locally or through the deploy platform configuration, never as a committed personal value.
 
 The deploy script runs:
 
@@ -162,7 +164,7 @@ The deploy script runs:
 npm run build && npm run db:migrate:remote && wrangler deploy
 ```
 
-`npm run build` first runs `tools/validate-deploy-config.mjs`. The build stops if `PRIMARY_DOMAIN` is still `example.com`, if the D1 binding is missing, if the R2 bucket binding is missing, or if `WORKER_SCRIPT_NAME` is blank. Maintainers working on the public template can bypass only this local template check with `EMAILFOX_SKIP_CONFIG_CHECK=1 npm run build`.
+`npm run build` first runs `tools/validate-deploy-config.mjs`. The build stops if `DOMAINS` is still `example.com`, if the D1 `database_id` is still the placeholder UUID, if the R2 bucket binding is missing, or if `WORKER_SCRIPT_NAME` is blank. Maintainers working on the public template can bypass only this local template check with `EMAILFOX_SKIP_CONFIG_CHECK=1 npm run build`.
 
 Cloudflare provisions the D1/R2 resources before running the configured deploy command in the one-click flow. The migration command then uses the binding name `DB`, which is important because deployers may rename the actual D1 database.
 

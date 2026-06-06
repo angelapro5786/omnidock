@@ -17,8 +17,8 @@
     "label": "Emailfox",
     "products": ["Workers", "D1", "R2", "Email Routing", "Email Sending"],
     "bindings": {
-      "PRIMARY_DOMAIN": {
-        "description": "Required. Main email domain to manage first, for example `example.com`. Emailfox will create it as the default domain during first setup."
+      "DOMAINS": {
+        "description": "Required. Main email domain to manage first, for example `example.com`. Emailfox will create the first domain as the default during setup. You may enter more domains later in the app."
       },
       "ADMIN_PASSWORD_BOOTSTRAP": {
         "description": "Optional legacy bootstrap password for automation only. Normal installs should leave this unset and create the first admin from the Emailfox setup screen after deploy."
