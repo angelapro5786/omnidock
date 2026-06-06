@@ -118,14 +118,16 @@ After the first deploy, open:
 
 Add Emailfox runtime settings in that Cloudflare screen. Choose `Secret`, not plaintext variable.
 
-| Secret name | When to add | Example value |
+Cloudflare does not create empty secret rows from the repository. Add one row for each secret you need: paste the exact value from `Name` into the Cloudflare `Name` field, type your own value into `Value`, then save.
+
+| Name | Value to type | When to add |
 | --- | --- | --- |
-| `DOMAINS` | Add after deploy | `example.com` |
-| `CLOUDFLARE_API_TOKEN` | Add when you want Cloudflare sync/routing automation | Cloudflare API token |
-| `WORKER_SCRIPT_NAME` | Add when you want Emailfox to create Email Routing rules | Deployed Worker script name |
-| `MANAGEMENT_HOST` | Add only for a custom dashboard hostname | `mail.example.com` |
-| `PASSWORD_RESET_FROM` | Add only for a custom verified reset sender | `no-reply@example.com` |
-| `CLOUDFLARE_ACCOUNT_ID` | Add only if one token can access multiple Cloudflare accounts | Cloudflare account id |
+| `PRIMARY_DOMAIN` | Your first email domain, for example `example.com` | Add after deploy if you want setup prefilled |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare API token | Add when you want Cloudflare sync/routing automation |
+| `WORKER_SCRIPT_NAME` | Deployed Worker script name, for example `emailfox` | Add when you want Emailfox to create Email Routing rules |
+| `MANAGEMENT_HOST` | Custom dashboard hostname, for example `mail.example.com` | Add only for a custom dashboard hostname |
+| `PASSWORD_RESET_FROM` | Verified reset sender, for example `no-reply@example.com` | Add only for a custom verified reset sender |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account id | Add only if one token can access multiple Cloudflare accounts |
 
 Do not add these values as plaintext Worker variables. Keep them as secrets.
 
@@ -221,7 +223,7 @@ Then set Emailfox runtime settings in Cloudflare:
 Wrangler equivalent:
 
 ```bash
-npx wrangler secret put DOMAINS
+npx wrangler secret put PRIMARY_DOMAIN
 npx wrangler secret put CLOUDFLARE_API_TOKEN
 npx wrangler secret put WORKER_SCRIPT_NAME
 npx wrangler secret put MANAGEMENT_HOST
