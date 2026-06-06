@@ -4,6 +4,8 @@ import { RuntimeEnv } from "./http";
 export type RuntimeRequirement = {
   kind: "binding" | "secret";
   name: string;
+  required: boolean;
+  configured: boolean;
   message: string;
 };
 
@@ -25,47 +27,90 @@ export function configuredPrimaryDomain(env: RuntimeEnv): string | null {
 }
 
 export function runtimeRequirements(env: RuntimeEnv, setupRequired: boolean): RuntimeRequirement[] {
-  const requirements: RuntimeRequirement[] = [];
-
-  if (!env.DB) {
-    requirements.push({
+  return [
+    {
       kind: "binding",
       name: "DB",
-      message: "Add a D1 database binding named DB."
-    });
-  }
-
-  if (!env.MAIL_BUCKET) {
-    requirements.push({
+      required: true,
+      configured: Boolean(env.DB),
+      message: env.DB ? "D1 database binding DB is connected." : "Add a D1 database binding named DB."
+    },
+    {
       kind: "binding",
       name: "MAIL_BUCKET",
-      message: "Add an R2 bucket binding named MAIL_BUCKET."
-    });
-  }
-
-  if (!env.EMAIL) {
-    requirements.push({
+      required: true,
+      configured: Boolean(env.MAIL_BUCKET),
+      message: env.MAIL_BUCKET ? "R2 bucket binding MAIL_BUCKET is connected." : "Add an R2 bucket binding named MAIL_BUCKET."
+    },
+    {
       kind: "binding",
       name: "EMAIL",
-      message: "Add a Cloudflare Email Sending binding named EMAIL."
-    });
-  }
-
-  if (setupRequired && !configuredAdminPassword(env)) {
-    requirements.push({
+      required: true,
+      configured: Boolean(env.EMAIL),
+      message: env.EMAIL ? "Email Sending binding EMAIL is connected." : "Add a Cloudflare Email Sending binding named EMAIL."
+    },
+    {
       kind: "secret",
       name: "ADMIN_PASSWORD",
-      message: "Add the first admin password as a Worker secret named ADMIN_PASSWORD."
-    });
-  }
-
-  if (setupRequired && !configuredPrimaryDomain(env)) {
-    requirements.push({
+      required: setupRequired,
+      configured: Boolean(configuredAdminPassword(env)),
+      message: configuredAdminPassword(env)
+        ? "First admin password secret is configured."
+        : "Add the first admin password as a Worker secret named ADMIN_PASSWORD."
+    },
+    {
       kind: "secret",
       name: "PRIMARY_DOMAIN",
-      message: "Add the first managed email domain as a Worker secret named PRIMARY_DOMAIN."
-    });
-  }
-
-  return requirements;
+      required: true,
+      configured: Boolean(configuredPrimaryDomain(env)),
+      message: configuredPrimaryDomain(env)
+        ? "Primary domain secret is configured."
+        : "Add the first managed email domain as a Worker secret named PRIMARY_DOMAIN."
+    },
+    {
+      kind: "secret",
+      name: "CLOUDFLARE_API_TOKEN",
+      required: false,
+      configured: Boolean(env.CLOUDFLARE_API_TOKEN),
+      message: env.CLOUDFLARE_API_TOKEN
+        ? "Cloudflare API token secret is configured."
+        : "Optional: add this to enable Cloudflare sync and routing automation."
+    },
+    {
+      kind: "secret",
+      name: "WORKER_SCRIPT_NAME",
+      required: false,
+      configured: Boolean(env.WORKER_SCRIPT_NAME),
+      message: env.WORKER_SCRIPT_NAME
+        ? "Worker script name secret is configured."
+        : "Optional: add the deployed Worker script name for routing rule automation."
+    },
+    {
+      kind: "secret",
+      name: "MANAGEMENT_HOST",
+      required: false,
+      configured: Boolean(env.MANAGEMENT_HOST),
+      message: env.MANAGEMENT_HOST
+        ? "Custom management host secret is configured."
+        : "Optional: add this only when using a custom dashboard hostname."
+    },
+    {
+      kind: "secret",
+      name: "PASSWORD_RESET_FROM",
+      required: false,
+      configured: Boolean(env.PASSWORD_RESET_FROM),
+      message: env.PASSWORD_RESET_FROM
+        ? "Password reset sender secret is configured."
+        : "Optional: add a verified sender address for password reset emails."
+    },
+    {
+      kind: "secret",
+      name: "CLOUDFLARE_ACCOUNT_ID",
+      required: false,
+      configured: Boolean(env.CLOUDFLARE_ACCOUNT_ID),
+      message: env.CLOUDFLARE_ACCOUNT_ID
+        ? "Cloudflare account id secret is configured."
+        : "Optional: add this only if your API token can access multiple accounts."
+    }
+  ];
 }

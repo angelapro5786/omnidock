@@ -1436,6 +1436,20 @@ button:hover:not(:disabled) {
   box-shadow: var(--shadow-strong);
 }
 
+.configuration-box {
+  width: min(760px, calc(100vw - 32px));
+}
+
+.configuration-box .requirement-list {
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 760px) {
+  .configuration-box .requirement-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .login-error,
 .auth-check {
   display: flex;
@@ -1473,7 +1487,7 @@ button:hover:not(:disabled) {
 
 .requirement-row {
   display: grid;
-  grid-template-columns: 74px minmax(0, 1fr) 32px;
+  grid-template-columns: 82px minmax(0, 1fr) 32px;
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -1484,11 +1498,21 @@ button:hover:not(:disabled) {
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--line) 52%, transparent);
 }
 
+.requirement-row.is-optional {
+  border-style: dashed;
+}
+
+.requirement-meta {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
 .requirement-kind {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 24px;
+  min-height: 22px;
   padding: 0 7px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
@@ -1498,6 +1522,24 @@ button:hover:not(:disabled) {
   font-weight: 800;
   line-height: 1;
   text-transform: uppercase;
+}
+
+.requirement-priority {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.requirement-row.is-required .requirement-priority {
+  color: var(--warn);
+}
+
+.requirement-row.is-optional .requirement-priority {
+  color: var(--accent-strong);
 }
 
 .requirement-name {

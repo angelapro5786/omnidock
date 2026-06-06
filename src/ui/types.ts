@@ -119,6 +119,7 @@ export type SetupStatusPayload = {
 export type RuntimeRequirement = {
   kind: "binding" | "secret";
   name: string;
+  required: boolean;
   message: string;
 };
 

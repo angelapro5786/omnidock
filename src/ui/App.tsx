@@ -682,7 +682,7 @@ function ConfigurationScreen({
       <div className="login-tools">
         <PaletteChooser value={palette} onChange={onPaletteChange} />
       </div>
-      <section className="login-box">
+      <section className="login-box configuration-box">
         <div className="brand-block">
           <img src="/emailfox-mark.svg" alt="" />
           <div>
@@ -696,8 +696,14 @@ function ConfigurationScreen({
         </div>
         <div className="requirement-list" aria-label="Required Cloudflare configuration">
           {requirements.map((item) => (
-            <div className="requirement-row" key={`${item.kind}:${item.name}`}>
-              <span className="requirement-kind">{item.kind}</span>
+            <div
+              className={item.required ? "requirement-row is-required" : "requirement-row is-optional"}
+              key={`${item.kind}:${item.name}`}
+            >
+              <div className="requirement-meta">
+                <span className="requirement-kind">{item.kind}</span>
+                <span className="requirement-priority">{item.required ? "required" : "optional"}</span>
+              </div>
               <button
                 className="requirement-name"
                 type="button"
