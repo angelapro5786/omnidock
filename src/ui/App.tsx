@@ -254,7 +254,7 @@ export function App() {
   async function submitSetup(input: {
     name: string;
     email: string;
-    recoveryEmail: string | null;
+    recoveryEmail: string;
     primaryDomain: string;
     password: string;
   }) {

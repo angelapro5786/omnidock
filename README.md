@@ -95,9 +95,11 @@ After the first deploy and D1 migration, open the Emailfox URL. If no admin acco
 
 - Name
 - Email
-- Recovery email
+- Recovery email, required and outside the primary domain
 - Primary domain
 - Password
+
+The recovery email is the password reset recipient. Use an external address such as a Gmail, iCloud, Outlook, or company mailbox that is not under the primary Emailfox domain.
 
 The password is stored only as a salted PBKDF2 hash in D1.
 
@@ -135,10 +137,8 @@ You will be asked to configure:
 | Value | Required | Notes |
 | --- | --- | --- |
 | `DOMAINS` | Yes | Main email domain for first setup. Replace the `example.com` placeholder before build. |
-| `CLOUDFLARE_API_TOKEN` | Yes | Used for Cloudflare sync and routing rule creation. |
-| `ADMIN_PASSWORD_BOOTSTRAP` | No | Legacy/automation fallback. Leave blank for normal first-screen admin creation. |
-| `MANAGEMENT_HOST` | No | Leave blank for the generated `workers.dev` host. Set later for a custom domain. |
-| `PASSWORD_RESET_FROM` | No | Verified sender for password reset emails. If blank, Emailfox uses the admin email. |
+| `CLOUDFLARE_API_TOKEN` | Yes | Runtime secret used for Cloudflare sync and routing rule creation. This is separate from the Workers Builds API token dropdown. |
+| `WORKER_SCRIPT_NAME` | Yes | Keep this equal to the Worker script name selected in Cloudflare's deploy screen. |
 | D1 database name | Yes | Default is `emailfox-db`; Cloudflare can provision it. |
 | R2 bucket name | Yes | Cloudflare can provision it during deploy. |
 
@@ -147,16 +147,19 @@ Every deployer must provide their own secrets in Cloudflare during setup. Do not
 Use Cloudflare secrets for:
 
 - `CLOUDFLARE_API_TOKEN`
-- `ADMIN_PASSWORD_BOOTSTRAP`, only if you intentionally use the legacy bootstrap path
 
 Use plain Worker vars only for non-secret values:
 
 - `DOMAINS`
-- `MANAGEMENT_HOST`
-- `PASSWORD_RESET_FROM`
 - `WORKER_SCRIPT_NAME`
 
-Advanced/manual installs may also add `CLOUDFLARE_ACCOUNT_ID` as a non-secret Worker var when one API token can access multiple Cloudflare accounts. It is intentionally not part of the one-click deploy form.
+Advanced/manual installs may also add non-secret Worker vars later:
+
+- `MANAGEMENT_HOST` for a custom dashboard hostname.
+- `PASSWORD_RESET_FROM` for a verified password reset sender. If omitted, Emailfox sends reset mail from `emailfox@<default-domain>`.
+- `CLOUDFLARE_ACCOUNT_ID` when one API token can access multiple Cloudflare accounts.
+
+These advanced values are intentionally not part of the one-click deploy form.
 
 `database_id` is not a Worker secret, but it is account-specific. The public template uses the placeholder `00000000-0000-0000-0000-000000000000` so the Deploy to Cloudflare resource step can replace it with the deployer's own generated D1 database id. Installed copies must keep that generated `database_id` for updates. For a private/manual deployment, add the deployer's own `database_id` locally or through the deploy platform configuration, never as a committed personal value.
 
@@ -276,7 +279,7 @@ cp .dev.vars.example .dev.vars
 Edit `.dev.vars`:
 
 ```dotenv
-CLOUDFLARE_API_TOKEN=replace-with-a-cloudflare-api-token
+CLOUDFLARE_API_TOKEN=replace-with-runtime-cloudflare-api-token
 ```
 
 Optional local-only values:

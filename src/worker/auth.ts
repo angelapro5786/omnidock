@@ -59,7 +59,7 @@ export async function createAdminAccount(
   }
 
   const name = normalizeAdminName(input.name);
-  const email = normalizeAdminEmail(input.email);
+  normalizeAdminEmail(input.email);
   const recoveryEmail = normalizeAdminEmail(input.recoveryEmail);
   validateExternalRecoveryEmail(recoveryEmail, input.primaryDomain);
   validatePassword(input.password);
