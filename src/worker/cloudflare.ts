@@ -326,7 +326,7 @@ function workerScriptName(env: RuntimeEnv): string {
     throw new ApiError(
       428,
       "worker_name_missing",
-      "Routing automation needs WORKER_SCRIPT_NAME. Add it as an advanced Worker variable with the deployed Worker script name."
+      "Routing automation needs WORKER_SCRIPT_NAME. Add it as a Worker secret with the deployed Worker script name."
     );
   }
   return scriptName;
@@ -347,14 +347,14 @@ async function resolveAccountId(env: RuntimeEnv): Promise<string> {
     throw new ApiError(
       500,
       "cloudflare_account_missing",
-      "Cloudflare API token cannot list any accounts. Add Account read permission or set CLOUDFLARE_ACCOUNT_ID."
+      "Cloudflare API token cannot list any accounts. Add Account read permission or set CLOUDFLARE_ACCOUNT_ID as a Worker secret."
     );
   }
 
   throw new ApiError(
     400,
     "cloudflare_account_ambiguous",
-    `Cloudflare API token can access ${accounts.length} accounts. Set CLOUDFLARE_ACCOUNT_ID to choose one.`
+    `Cloudflare API token can access ${accounts.length} accounts. Set CLOUDFLARE_ACCOUNT_ID as a Worker secret to choose one.`
   );
 }
 

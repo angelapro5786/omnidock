@@ -93,8 +93,6 @@ The recovery email is the password reset recipient. Use an external address such
 
 The password is stored only as a salted PBKDF2 hash in D1.
 
-`ADMIN_PASSWORD_BOOTSTRAP` is optional and exists only for legacy or automated installs. Normal public deploys can leave it blank.
-
 ### Advanced Cloudflare Automation
 
 Emailfox can be deployed without a runtime Cloudflare API token. In that mode, the inbox, setup, D1, R2, contacts, signatures, sending from configured addresses, and manual domain management can still work.
@@ -112,23 +110,22 @@ Recommended permissions:
 
 If your token can access exactly one Cloudflare account, Emailfox detects that account automatically. If it can access multiple accounts, add `CLOUDFLARE_ACCOUNT_ID` as a secret too.
 
-## Post-Deploy Secrets
+## Cloudflare Secrets
 
 After the first deploy, open:
 
 `Worker > Settings > Variables and Secrets > Add > Secret`
 
-Use secrets for every Emailfox runtime setting:
+Add Emailfox runtime settings in that Cloudflare screen. Choose `Secret`, not plaintext variable.
 
-| Secret | Required | Notes |
+| Secret name | When to add | Example value |
 | --- | --- | --- |
-| `DOMAINS` | Recommended | Primary Emailfox domain, for example `example.com`. The first setup screen can also ask for this if unset. |
-| `CLOUDFLARE_API_TOKEN` | Optional | Enables Cloudflare sync, Email Sending status, Email Routing status, catch-all, and routing rule automation. |
-| `WORKER_SCRIPT_NAME` | Optional | Required only for automatic Email Routing rule creation. Set it to the deployed Worker script name. |
-| `MANAGEMENT_HOST` | Optional | Custom dashboard hostname such as `mail.example.com`. If unset, Emailfox uses the Worker URL. |
-| `PASSWORD_RESET_FROM` | Optional | Verified password reset sender. If unset, Emailfox uses `emailfox@<default-domain>`. |
-| `CLOUDFLARE_ACCOUNT_ID` | Optional | Only needed when `CLOUDFLARE_API_TOKEN` can access multiple Cloudflare accounts. |
-| `ADMIN_PASSWORD_BOOTSTRAP` | Legacy | Leave unset for normal installs. Use only for automation that intentionally skips the first setup screen. |
+| `DOMAINS` | Add after deploy | `example.com` |
+| `CLOUDFLARE_API_TOKEN` | Add when you want Cloudflare sync/routing automation | Cloudflare API token |
+| `WORKER_SCRIPT_NAME` | Add when you want Emailfox to create Email Routing rules | Deployed Worker script name |
+| `MANAGEMENT_HOST` | Add only for a custom dashboard hostname | `mail.example.com` |
+| `PASSWORD_RESET_FROM` | Add only for a custom verified reset sender | `no-reply@example.com` |
+| `CLOUDFLARE_ACCOUNT_ID` | Add only if one token can access multiple Cloudflare accounts | Cloudflare account id |
 
 Do not add these values as plaintext Worker variables. Keep them as secrets.
 
@@ -217,7 +214,11 @@ Build, apply remote migrations, and deploy:
 npm run deploy
 ```
 
-Then set Emailfox runtime settings as secrets:
+Then set Emailfox runtime settings in Cloudflare:
+
+`Worker > Settings > Variables and Secrets > Add > Secret`
+
+Wrangler equivalent:
 
 ```bash
 npx wrangler secret put DOMAINS
@@ -226,10 +227,9 @@ npx wrangler secret put WORKER_SCRIPT_NAME
 npx wrangler secret put MANAGEMENT_HOST
 npx wrangler secret put PASSWORD_RESET_FROM
 npx wrangler secret put CLOUDFLARE_ACCOUNT_ID
-npx wrangler secret put ADMIN_PASSWORD_BOOTSTRAP
 ```
 
-Only set the optional secrets you need. Only set `ADMIN_PASSWORD_BOOTSTRAP` if you intentionally want to skip the first-screen admin creation flow.
+Only set the optional secrets you need.
 
 ## Local Development
 
@@ -249,7 +249,6 @@ Optional local-only values:
 
 ```dotenv
 PASSWORD_RESET_FROM=no-reply@example.com
-ADMIN_PASSWORD_BOOTSTRAP=
 ```
 
 If you want local sample data, add this only to your local `.dev.vars`:
@@ -301,7 +300,6 @@ The seed endpoint is disabled unless `ENABLE_DEV_SEED=true`.
 - Do not commit `.dev.vars`.
 - Do not commit real API tokens or admin passwords.
 - Use least-privilege Cloudflare API tokens.
-- Leave `ADMIN_PASSWORD_BOOTSTRAP` blank unless you intentionally use the legacy bootstrap path.
 - Password reset tokens are stored hashed in D1 and expire after 30 minutes.
 - Emailfox only sends from enabled D1 mailbox addresses on verified sending domains.
 - `sessionStorage` is used for the admin password in the browser session. For a larger public SaaS deployment, consider replacing this with HttpOnly session cookies and CSRF protection.
