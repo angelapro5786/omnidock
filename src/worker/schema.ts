@@ -6,7 +6,8 @@ const CURRENT_MIGRATIONS = [
   "0003_mailbox_routing.sql",
   "0004_contacts_signatures.sql",
   "0005_default_domain.sql",
-  "0006_admin_profile_reset.sql"
+  "0006_admin_profile_reset.sql",
+  "0007_external_accounts.sql"
 ];
 
 let schemaReady: Promise<void> | null = null;
@@ -180,6 +181,28 @@ const schemaStatements = [
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
   )`,
+  `CREATE TABLE IF NOT EXISTS external_accounts (
+    id TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    email TEXT NOT NULL UNIQUE,
+    display_name TEXT,
+    username TEXT,
+    auth_type TEXT NOT NULL DEFAULT 'app_password',
+    credential_secret_name TEXT,
+    imap_host TEXT,
+    imap_port INTEGER,
+    imap_security TEXT NOT NULL DEFAULT 'ssl',
+    smtp_host TEXT,
+    smtp_port INTEGER,
+    smtp_security TEXT NOT NULL DEFAULT 'starttls',
+    inbound_enabled INTEGER NOT NULL DEFAULT 0,
+    outbound_enabled INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'needs_secret',
+    last_checked_at TEXT,
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
   `CREATE TABLE IF NOT EXISTS d1_migrations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT UNIQUE,
@@ -198,6 +221,8 @@ const indexStatements = [
   "CREATE INDEX IF NOT EXISTS idx_contacts_email ON contacts(email)",
   "CREATE INDEX IF NOT EXISTS idx_contacts_name ON contacts(name)",
   "CREATE INDEX IF NOT EXISTS idx_mailbox_signatures_mailbox ON mailbox_signatures(mailbox_id)",
+  "CREATE INDEX IF NOT EXISTS idx_external_accounts_email ON external_accounts(email)",
+  "CREATE INDEX IF NOT EXISTS idx_external_accounts_provider ON external_accounts(provider)",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_domains_default ON domains(is_default) WHERE is_default = 1",
   "CREATE INDEX IF NOT EXISTS idx_admin_auth_email ON admin_auth(admin_email)",
   "CREATE INDEX IF NOT EXISTS idx_admin_auth_reset ON admin_auth(reset_token_hash)"
