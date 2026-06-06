@@ -650,13 +650,22 @@ function parseExtraR2Buckets(value?: string): Map<string, string> {
     const item = rawItem.trim();
     if (!item) continue;
     const separator = item.includes("=") ? "=" : item.includes(":") ? ":" : "";
-    const binding = (separator ? item.slice(0, item.indexOf(separator)) : item).trim();
-    const displayName = (separator ? item.slice(item.indexOf(separator) + 1) : binding).trim();
+    const displayName = (separator ? item.slice(item.indexOf(separator) + 1) : item).trim();
+    const binding = (separator ? item.slice(0, item.indexOf(separator)) : bindingNameForBucket(displayName)).trim();
     if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(binding)) continue;
     result.set(binding, displayName || binding);
   }
 
   return result;
+}
+
+function bindingNameForBucket(bucketName: string): string {
+  const normalized = bucketName
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 48);
+  return `R2_${normalized || "BUCKET"}`;
 }
 
 function discoverR2BindingNames(env: RuntimeEnv): string[] {

@@ -68,7 +68,7 @@ OmniDock avoids that by generating `DB` and `MAIL_BUCKET` into the deploy config
 
 - `OMNIDOCK_D1_DATABASE_ID`
 - `OMNIDOCK_R2_BUCKET_NAME`
-- `OMNIDOCK_EXTRA_R2_BUCKETS` for any additional R2 buckets
+- `OMNIDOCK_EXTRA_R2_BUCKETS` for any additional R2 bucket names
 
 The default Worker script name is `omnidock`. If your deployed Worker uses a different script name, add `WORKER_SCRIPT_NAME` as a build variable with that exact name before deploying.
 
@@ -167,7 +167,7 @@ These values are build-time values. They are used to deploy the Worker with corr
 | `OMNIDOCK_D1_DATABASE_ID` | Your D1 database id | Yes |
 | `OMNIDOCK_R2_BUCKET_NAME` | Your R2 bucket name, for example `omnidock-mail` | Yes |
 | `OMNIDOCK_D1_DATABASE_NAME` | D1 display name, for example `omnidock-db` | Optional |
-| `OMNIDOCK_EXTRA_R2_BUCKETS` | Extra R2 deploy bindings, for example `FILES_BUCKET:my-files-bucket` | Optional |
+| `OMNIDOCK_EXTRA_R2_BUCKETS` | Extra R2 bucket names, for example `client-files,media-files` | Optional |
 | `WORKER_SCRIPT_NAME` | Deployed Worker script name, for example `omnidock` | Optional, only when your script name is different |
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account id | Only if the build token can access multiple accounts |
 
@@ -188,14 +188,12 @@ Cloudflare does not create empty variable rows from the repository. Add one row 
 | Secret | `ADMIN_PASSWORD` | First admin password, at least 12 characters | Required before first setup |
 | Plaintext variable | `PRIMARY_DOMAIN` | First managed email domain, for example `example.com` | Required before first setup |
 | Secret | `CLOUDFLARE_API_TOKEN` | Cloudflare API token | Required before first setup |
-| Plaintext variable | `R2_BUCKET_NAME` | Primary R2 bucket display name | Optional override; normally generated from `OMNIDOCK_R2_BUCKET_NAME` |
-| Plaintext variable | `EXTRA_R2_BUCKETS` | Extra R2 display list, for example `FILES_BUCKET:my-files-bucket` | Optional override; normally generated from `OMNIDOCK_EXTRA_R2_BUCKETS` |
 | Plaintext variable | `WORKER_SCRIPT_NAME` | Deployed Worker script name, for example `omnidock` | Add when OmniDock should create Email Routing rules |
 | Plaintext variable | `MANAGEMENT_HOST` | Custom dashboard hostname, for example `mail.example.com` | Optional |
 | Plaintext variable | `PASSWORD_RESET_FROM` | Verified reset sender, for example `no-reply@example.com` | Optional |
 | Plaintext variable | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account id | Only if one token can access multiple accounts |
 
-`PRIMARY_DOMAIN`, `R2_BUCKET_NAME`, `EXTRA_R2_BUCKETS`, `WORKER_SCRIPT_NAME`, `MANAGEMENT_HOST`, `PASSWORD_RESET_FROM`, and `CLOUDFLARE_ACCOUNT_ID` are not secrets.
+`PRIMARY_DOMAIN`, `WORKER_SCRIPT_NAME`, `MANAGEMENT_HOST`, `PASSWORD_RESET_FROM`, and `CLOUDFLARE_ACCOUNT_ID` are not secrets.
 
 Do not add `ADMIN_PASSWORD` or `CLOUDFLARE_API_TOKEN` as plaintext variables.
 
@@ -215,30 +213,25 @@ The running Worker must receive `DB` as a D1 binding and `MAIL_BUCKET` as an R2 
 
 `MAIL_BUCKET` is the primary bucket used for raw email, attachments, and manual files. You can attach additional R2 buckets for file browsing and management.
 
-To add another bucket:
+Simple path for extra buckets:
 
-1. In Cloudflare, open the Worker settings.
-2. Go to Bindings and add an R2 bucket binding.
-3. Use a binding variable name such as `FILES_BUCKET`, `MEDIA_BUCKET`, or `PRIVATE_BUCKET`. Do not use the reserved `ASSETS` binding name.
-4. Select the real R2 bucket resource you want to connect.
-5. For Git deploys, add build variable `OMNIDOCK_EXTRA_R2_BUCKETS` with the deploy mapping:
+1. Create or select the R2 buckets in Cloudflare.
+2. Add one build variable named `OMNIDOCK_EXTRA_R2_BUCKETS`.
+3. Put only the bucket names in the value, separated by commas.
+4. Deploy with `node tools/deploy-preserving-bindings.mjs` or `npm run deploy`.
 
 ```dotenv
-OMNIDOCK_EXTRA_R2_BUCKETS=FILES_BUCKET:my-files-bucket
+OMNIDOCK_EXTRA_R2_BUCKETS=client-files,media-files
 ```
 
-For multiple buckets:
+OmniDock automatically creates safe Worker binding names such as `R2_CLIENT_FILES` and `R2_MEDIA_FILES`, then shows the real bucket names in the Buckets dropdown.
+
+Do not open the Worker R2 binding form for this simple path. If Cloudflare asks you to choose an R2 bucket from a dropdown, you are in the manual Bindings screen. Cancel that form and add `OMNIDOCK_EXTRA_R2_BUCKETS` under Build configuration > Variables and secrets instead.
+
+Advanced custom binding names are still supported when you need them:
 
 ```dotenv
-OMNIDOCK_EXTRA_R2_BUCKETS=FILES_BUCKET:my-files-bucket,PRIVATE_BUCKET:private-files
-```
-
-The value before `:` is the Worker binding name. The value after `:` is the real R2 bucket name. OmniDock uses that same bucket name in the Buckets dropdown.
-
-For example, if you connect a real bucket named `client-files`, use a Worker binding name like `FILES_BUCKET` and add:
-
-```dotenv
-OMNIDOCK_EXTRA_R2_BUCKETS=FILES_BUCKET:client-files
+OMNIDOCK_EXTRA_R2_BUCKETS=FILES_BUCKET:client-files,MEDIA_BUCKET:media-files
 ```
 
 Keep the Cloudflare deploy command as `node tools/deploy-preserving-bindings.mjs` or `npm run deploy`. A bare `npx wrangler deploy` can remove extra R2 bindings that only exist in the dashboard.

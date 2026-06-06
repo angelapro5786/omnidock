@@ -142,15 +142,23 @@ function parseExtraR2Buckets(value) {
     const item = rawItem.trim();
     if (!item) continue;
     const separator = item.includes("=") ? "=" : item.includes(":") ? ":" : "";
-    if (!separator) continue;
-    const binding = item.slice(0, item.indexOf(separator)).trim();
-    const bucketName = item.slice(item.indexOf(separator) + 1).trim();
+    const bucketName = (separator ? item.slice(item.indexOf(separator) + 1) : item).trim();
+    const binding = (separator ? item.slice(0, item.indexOf(separator)) : bindingNameForBucket(bucketName)).trim();
     if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(binding) || !bucketName || seen.has(binding) || RESERVED_EXTRA_R2_BINDINGS.has(binding)) continue;
     seen.add(binding);
     buckets.push({ binding, bucket_name: bucketName });
   }
 
   return buckets;
+}
+
+function bindingNameForBucket(bucketName) {
+  const normalized = bucketName
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 48);
+  return `R2_${normalized || "BUCKET"}`;
 }
 
 function readJsonc(path) {

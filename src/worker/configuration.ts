@@ -47,24 +47,6 @@ export function runtimeRequirements(env: RuntimeEnv, setupRequired: boolean): Ru
         : "Add an R2 bucket binding named MAIL_BUCKET. For Git deploys, set OMNIDOCK_R2_BUCKET_NAME as a build variable, then redeploy."
     },
     {
-      kind: "variable",
-      name: "R2_BUCKET_NAME",
-      required: false,
-      configured: Boolean(env.R2_BUCKET_NAME),
-      message: env.R2_BUCKET_NAME
-        ? "R2 bucket display name variable is configured."
-        : "Optional: add the R2 bucket display name as R2_BUCKET_NAME."
-    },
-    {
-      kind: "variable",
-      name: "EXTRA_R2_BUCKETS",
-      required: false,
-      configured: Boolean(env.EXTRA_R2_BUCKETS),
-      message: env.EXTRA_R2_BUCKETS
-        ? "Extra R2 bucket list is configured."
-        : "Optional: list extra R2 bindings as EXTRA_R2_BUCKETS, for example FILES_BUCKET:Files."
-    },
-    {
       kind: "binding",
       name: "EMAIL",
       required: true,
