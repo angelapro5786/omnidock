@@ -6,6 +6,7 @@ export type RuntimeEnv = Env & {
   DOMAINS?: string;
   ENABLE_DEV_SEED?: string;
   EMAIL: SendEmail;
+  EXTRA_R2_BUCKETS?: string;
   MAIL_BUCKET: R2Bucket;
   MANAGEMENT_HOST?: string;
   PRIMARY_DOMAIN?: string;

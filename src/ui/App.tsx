@@ -1622,6 +1622,12 @@ function Sidebar({
   onSettingsOpen: (view: SettingsViewKey) => void;
   onLock: () => void;
 }) {
+  const [bucketsOpen, setBucketsOpen] = useState(true);
+
+  useEffect(() => {
+    if (view === "buckets") setBucketsOpen(true);
+  }, [view]);
+
   return (
     <aside className="sidebar">
       <div className="brand-row">
@@ -1664,11 +1670,18 @@ function Sidebar({
       </nav>
 
       <div className="sidebar-section">
-        <div className="section-title">
+        <button
+          className="section-title section-toggle"
+          type="button"
+          onClick={() => setBucketsOpen((open) => !open)}
+          aria-expanded={bucketsOpen}
+        >
+          {bucketsOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           <Server size={14} />
-          Buckets
-        </div>
-        {buckets.length > 0 ? (
+          <span>Buckets</span>
+          <b>{buckets.length}</b>
+        </button>
+        {bucketsOpen && buckets.length > 0 ? (
           buckets.map((bucket) => (
             <button
               className={view === "buckets" && selectedBucketId === bucket.id ? "settings-link active" : "settings-link"}
@@ -1682,13 +1695,13 @@ function Sidebar({
               <b>{bucket.configured ? "R2" : "Off"}</b>
             </button>
           ))
-        ) : (
+        ) : bucketsOpen ? (
           <button className="settings-link" disabled>
             <Server size={16} />
             <span>No buckets</span>
             <b>Off</b>
           </button>
-        )}
+        ) : null}
       </div>
 
       <div className="sidebar-section">

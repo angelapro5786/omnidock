@@ -16,6 +16,7 @@ const preservedResourceBindings = new Set();
 const d1DatabaseId = envValue("OMNIDOCK_D1_DATABASE_ID");
 const d1DatabaseName = envValue("OMNIDOCK_D1_DATABASE_NAME") || "omnidock-db";
 const r2BucketName = envValue("OMNIDOCK_R2_BUCKET_NAME");
+const extraR2Buckets = parseExtraR2Buckets(envValue("OMNIDOCK_EXTRA_R2_BUCKETS"));
 
 if (d1DatabaseId) {
   generatedConfig.d1_databases = [
@@ -30,13 +31,16 @@ if (d1DatabaseId) {
 }
 
 if (r2BucketName) {
-  generatedConfig.r2_buckets = [
-    {
-      binding: "MAIL_BUCKET",
-      bucket_name: r2BucketName
-    }
-  ];
+  upsertR2Bucket(generatedConfig, {
+    binding: "MAIL_BUCKET",
+    bucket_name: r2BucketName
+  });
   preservedResourceBindings.add("MAIL_BUCKET");
+}
+
+for (const bucket of extraR2Buckets) {
+  upsertR2Bucket(generatedConfig, bucket);
+  preservedResourceBindings.add(bucket.binding);
 }
 
 if (token && workerName) {
@@ -101,19 +105,24 @@ function mergeCloudflareBindings(config, bindings) {
     preserved.push("DB");
   }
 
-  const r2 = bindings.find((binding) => binding.type === "r2_bucket" && binding.name === "MAIL_BUCKET" && binding.bucket_name);
-  if (r2) {
-    config.r2_buckets = [
-      {
-        binding: "MAIL_BUCKET",
-        bucket_name: r2.bucket_name,
-        ...(r2.jurisdiction ? { jurisdiction: r2.jurisdiction } : {})
-      }
-    ];
-    preserved.push("MAIL_BUCKET");
+  const r2Bindings = bindings.filter((binding) => binding.type === "r2_bucket" && binding.name && binding.bucket_name);
+  for (const r2 of r2Bindings) {
+    upsertR2Bucket(config, {
+      binding: r2.name,
+      bucket_name: r2.bucket_name,
+      ...(r2.jurisdiction ? { jurisdiction: r2.jurisdiction } : {})
+    });
+    preserved.push(r2.name);
   }
 
   return preserved;
+}
+
+function upsertR2Bucket(config, bucket) {
+  const buckets = Array.isArray(config.r2_buckets) ? config.r2_buckets : [];
+  const next = buckets.filter((item) => item?.binding !== bucket.binding);
+  next.push(bucket);
+  config.r2_buckets = next;
 }
 
 async function configuredAccountId(tokenValue) {
@@ -225,4 +234,24 @@ function envValue(name) {
 
 function envFlag(name) {
   return process.env[name] === "1";
+}
+
+function parseExtraR2Buckets(value) {
+  if (!value) return [];
+  const buckets = [];
+  const seen = new Set(["MAIL_BUCKET"]);
+
+  for (const rawItem of value.split(/[,\n]/)) {
+    const item = rawItem.trim();
+    if (!item) continue;
+    const separator = item.includes("=") ? "=" : item.includes(":") ? ":" : "";
+    if (!separator) continue;
+    const binding = item.slice(0, item.indexOf(separator)).trim();
+    const bucketName = item.slice(item.indexOf(separator) + 1).trim();
+    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(binding) || !bucketName || seen.has(binding)) continue;
+    seen.add(binding);
+    buckets.push({ binding, bucket_name: bucketName });
+  }
+
+  return buckets;
 }

@@ -383,6 +383,29 @@ button:hover:not(:disabled) {
   text-transform: uppercase;
 }
 
+.section-toggle {
+  width: 100%;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.section-toggle span {
+  flex: 1;
+}
+
+.section-toggle b {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.section-toggle:hover:not(:disabled) {
+  background: transparent;
+  color: var(--accent-strong);
+}
+
 .domain-scroll {
   gap: 4px;
   max-height: 300px;

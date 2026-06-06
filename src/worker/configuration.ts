@@ -56,6 +56,15 @@ export function runtimeRequirements(env: RuntimeEnv, setupRequired: boolean): Ru
         : "Optional: add the R2 bucket display name as R2_BUCKET_NAME."
     },
     {
+      kind: "variable",
+      name: "EXTRA_R2_BUCKETS",
+      required: false,
+      configured: Boolean(env.EXTRA_R2_BUCKETS),
+      message: env.EXTRA_R2_BUCKETS
+        ? "Extra R2 bucket list is configured."
+        : "Optional: list extra R2 bindings as EXTRA_R2_BUCKETS, for example FILES_BUCKET:Files."
+    },
+    {
       kind: "binding",
       name: "EMAIL",
       required: true,

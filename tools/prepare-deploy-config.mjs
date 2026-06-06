@@ -7,6 +7,7 @@ const PLACEHOLDER_R2_BUCKET = "omnidock-mail";
 const d1DatabaseId = envValue("OMNIDOCK_D1_DATABASE_ID");
 const d1DatabaseName = envValue("OMNIDOCK_D1_DATABASE_NAME") || "omnidock-db";
 const r2BucketName = envValue("OMNIDOCK_R2_BUCKET_NAME");
+const extraR2Buckets = parseExtraR2Buckets(envValue("OMNIDOCK_EXTRA_R2_BUCKETS"));
 
 const config = readJsonc(CONFIG_PATH);
 let changed = false;
@@ -26,13 +27,19 @@ if (d1DatabaseId && d1DatabaseId !== PLACEHOLDER_D1_ID) {
   console.warn("OmniDock removed the public DB placeholder from this deploy config.");
 }
 
+const r2Bindings = [];
 if (r2BucketName) {
-  config.r2_buckets = [
-    {
-      binding: "MAIL_BUCKET",
-      bucket_name: r2BucketName
-    }
-  ];
+  r2Bindings.push({
+    binding: "MAIL_BUCKET",
+    bucket_name: r2BucketName
+  });
+}
+for (const bucket of extraR2Buckets) {
+  r2Bindings.push(bucket);
+}
+
+if (r2Bindings.length > 0) {
+  config.r2_buckets = r2Bindings;
   changed = true;
 } else if (removeR2Placeholder(config)) {
   changed = true;
@@ -74,6 +81,26 @@ function removeR2Placeholder(config) {
 
 function envValue(name) {
   return process.env[name]?.trim() || "";
+}
+
+function parseExtraR2Buckets(value) {
+  if (!value) return [];
+  const buckets = [];
+  const seen = new Set(["MAIL_BUCKET"]);
+
+  for (const rawItem of value.split(/[,\n]/)) {
+    const item = rawItem.trim();
+    if (!item) continue;
+    const separator = item.includes("=") ? "=" : item.includes(":") ? ":" : "";
+    if (!separator) continue;
+    const binding = item.slice(0, item.indexOf(separator)).trim();
+    const bucketName = item.slice(item.indexOf(separator) + 1).trim();
+    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(binding) || !bucketName || seen.has(binding)) continue;
+    seen.add(binding);
+    buckets.push({ binding, bucket_name: bucketName });
+  }
+
+  return buckets;
 }
 
 function readJsonc(path) {

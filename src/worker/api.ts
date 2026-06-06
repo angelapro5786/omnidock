@@ -592,7 +592,7 @@ function requireMailSendBindings(env: RuntimeEnv): void {
 type BucketInfo = {
   id: string;
   name: string;
-  binding: "MAIL_BUCKET";
+  binding: string;
   configured: boolean;
   writable: boolean;
   description: string;
@@ -605,7 +605,9 @@ type BucketBinding = {
 
 function listAvailableBuckets(env: RuntimeEnv): BucketInfo[] {
   const configured = Boolean(env.MAIL_BUCKET);
-  return [
+  const displayNames = parseExtraR2Buckets(env.EXTRA_R2_BUCKETS);
+  const extraBindings = new Set<string>([...displayNames.keys(), ...discoverR2BindingNames(env)]);
+  const buckets: BucketInfo[] = [
     {
       id: "mail",
       name: runtimeBucketName(env),
@@ -615,15 +617,77 @@ function listAvailableBuckets(env: RuntimeEnv): BucketInfo[] {
       description: "OmniDock raw messages, attachments, and manual files"
     }
   ];
+
+  for (const binding of [...extraBindings].sort((left, right) => left.localeCompare(right))) {
+    if (binding === "MAIL_BUCKET") continue;
+    const bucket = r2BucketFromEnv(env, binding);
+    buckets.push({
+      id: bucketIdForBinding(binding),
+      name: displayNames.get(binding) ?? binding,
+      binding,
+      configured: Boolean(bucket),
+      writable: Boolean(bucket),
+      description: bucket
+        ? `Extra R2 bucket binding ${binding}`
+        : `Add an R2 bucket binding named ${binding}`
+    });
+  }
+
+  return buckets;
+}
+
+function parseExtraR2Buckets(value?: string): Map<string, string> {
+  const result = new Map<string, string>();
+  if (!value?.trim()) return result;
+
+  for (const rawItem of value.split(/[,\n]/)) {
+    const item = rawItem.trim();
+    if (!item) continue;
+    const separator = item.includes("=") ? "=" : item.includes(":") ? ":" : "";
+    const binding = (separator ? item.slice(0, item.indexOf(separator)) : item).trim();
+    const displayName = (separator ? item.slice(item.indexOf(separator) + 1) : binding).trim();
+    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(binding)) continue;
+    result.set(binding, displayName || binding);
+  }
+
+  return result;
+}
+
+function discoverR2BindingNames(env: RuntimeEnv): string[] {
+  const source = env as unknown as Record<string, unknown>;
+  return Object.keys(source).filter((key) => key !== "MAIL_BUCKET" && isR2Bucket(source[key]));
+}
+
+function r2BucketFromEnv(env: RuntimeEnv, binding: string): R2Bucket | null {
+  const value = (env as unknown as Record<string, unknown>)[binding];
+  return isR2Bucket(value) ? value : null;
+}
+
+function isR2Bucket(value: unknown): value is R2Bucket {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<Record<"get" | "put" | "delete" | "list", unknown>>;
+  return (
+    typeof candidate.get === "function" &&
+    typeof candidate.put === "function" &&
+    typeof candidate.delete === "function" &&
+    typeof candidate.list === "function"
+  );
+}
+
+function bucketIdForBinding(binding: string): string {
+  return binding.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "bucket";
 }
 
 function getBucketBinding(env: RuntimeEnv, bucketId: string): BucketBinding {
-  if (bucketId !== "mail") {
+  const info = listAvailableBuckets(env).find((bucket) => bucket.id === bucketId);
+  if (!info) {
     throw new ApiError(404, "bucket_not_found", "Bucket is not configured for this Worker");
   }
-  requireMailBucketBinding(env);
-  const info = listAvailableBuckets(env)[0];
-  return { info, bucket: env.MAIL_BUCKET };
+  const bucket = r2BucketFromEnv(env, info.binding);
+  if (!bucket) {
+    throw new ApiError(503, "bucket_binding_missing", `R2 binding ${info.binding} is not configured for this Worker.`);
+  }
+  return { info, bucket };
 }
 
 function runtimeBucketName(env: RuntimeEnv): string {
