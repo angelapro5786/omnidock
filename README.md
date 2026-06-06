@@ -268,10 +268,10 @@ Create `.dev.vars` from the example:
 cp .dev.vars.example .dev.vars
 ```
 
-Edit `.dev.vars` only if you want local Cloudflare automation:
+Edit `.dev.vars` only if you want local Cloudflare automation. Add the optional Cloudflare API token manually when needed.
 
 ```dotenv
-CLOUDFLARE_API_TOKEN=replace-with-runtime-cloudflare-api-token
+# optional Cloudflare automation token goes here
 ```
 
 Optional local-only values:
