@@ -1016,9 +1016,9 @@ button:hover:not(:disabled) {
 }
 
 .bucket-toolbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(220px, 360px) minmax(420px, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
   min-height: 54px;
   padding: 8px 10px;
@@ -1041,7 +1041,7 @@ button:hover:not(:disabled) {
 .bucket-select {
   display: grid;
   gap: 4px;
-  min-width: min(360px, 48vw);
+  min-width: 0;
 }
 
 .bucket-select .custom-select-trigger {
@@ -1053,6 +1053,46 @@ button:hover:not(:disabled) {
 
 .bucket-select .custom-select-menu {
   width: max(100%, 320px);
+}
+
+.bucket-searchbar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 132px auto auto auto;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.bucket-search-input {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  min-width: 0;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--control);
+  color: var(--muted);
+}
+
+.bucket-search-input input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+}
+
+.bucket-search-scope .custom-select-trigger,
+.bucket-searchbar .button {
+  height: 34px;
+}
+
+.bucket-search-scope .custom-select-menu {
+  width: 180px;
 }
 
 .bucket-actions {
@@ -1090,7 +1130,7 @@ button:hover:not(:disabled) {
 .bucket-layout {
   display: grid;
   flex: 1 1 auto;
-  grid-template-columns: minmax(220px, 300px) minmax(320px, 420px) minmax(420px, 1fr);
+  grid-template-columns: minmax(240px, 320px) minmax(380px, 520px) minmax(440px, 1fr);
   gap: 12px;
   min-height: 0;
 }
@@ -1199,7 +1239,7 @@ button:hover:not(:disabled) {
 }
 
 .bucket-row.object {
-  grid-template-rows: auto auto;
+  grid-template-rows: auto auto auto;
   min-height: 48px;
   padding: 6px 9px;
 }
@@ -1222,6 +1262,15 @@ button:hover:not(:disabled) {
 .bucket-row.object:hover b,
 .bucket-row.object:hover small {
   color: var(--muted);
+}
+
+.bucket-row.object em {
+  grid-column: 2 / -1;
+  overflow: hidden;
+  color: var(--text);
+  font: 11px/1.35 var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .bucket-row.object.active:hover {
@@ -2940,6 +2989,15 @@ button:hover:not(:disabled) {
   .main-grid {
     grid-template-columns: minmax(280px, 340px) minmax(360px, 1fr);
   }
+
+  .bucket-toolbar {
+    grid-template-columns: minmax(200px, 300px) minmax(360px, 1fr);
+  }
+
+  .bucket-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
 }
 
 @media (max-width: 920px) {
@@ -3010,6 +3068,15 @@ button:hover:not(:disabled) {
   .bucket-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .bucket-toolbar,
+  .bucket-searchbar {
+    grid-template-columns: 1fr;
+  }
+
+  .bucket-actions {
+    grid-column: auto;
   }
 
   .rules-table-card {

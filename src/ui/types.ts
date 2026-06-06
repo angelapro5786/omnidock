@@ -142,6 +142,14 @@ export type BucketObjectRow = {
   contentType: string;
 };
 
+export type BucketSearchResultRow = BucketObjectRow & {
+  bucketId: string;
+  bucketName: string;
+  bucketBinding: string;
+  match: "path" | "content";
+  snippet: string | null;
+};
+
 export type BootstrapPayload = {
   ok: true;
   managementHost: string;
@@ -162,6 +170,17 @@ export type BucketObjectsPayload = {
   folders: BucketFolderRow[];
   objects: BucketObjectRow[];
   cursor: string | null;
+  truncated: boolean;
+};
+
+export type BucketSearchPayload = {
+  ok: true;
+  query: string;
+  scope: "bucket" | "all";
+  bucket: BucketRow | null;
+  results: BucketSearchResultRow[];
+  scanned: number;
+  contentScanned: number;
   truncated: boolean;
 };
 

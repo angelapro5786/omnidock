@@ -1,6 +1,7 @@
 import {
   BootstrapPayload,
   BucketObjectsPayload,
+  BucketSearchPayload,
   ContactRow,
   DomainRow,
   ExternalAccountRow,
@@ -234,6 +235,19 @@ export class ApiClient {
     if (cursor) params.set("cursor", cursor);
     const suffix = params.toString() ? `?${params.toString()}` : "";
     return this.request<BucketObjectsPayload>(`/api/buckets/${encodeURIComponent(bucketId)}/objects${suffix}`);
+  }
+
+  searchBucketObjects(input: {
+    bucketId: string | null;
+    query: string;
+    allBuckets: boolean;
+    includeText: boolean;
+  }): Promise<BucketSearchPayload> {
+    const params = new URLSearchParams({ q: input.query });
+    params.set("scope", input.allBuckets ? "all" : "bucket");
+    if (input.bucketId) params.set("bucketId", input.bucketId);
+    if (input.includeText) params.set("text", "1");
+    return this.request<BucketSearchPayload>(`/api/buckets/search?${params.toString()}`);
   }
 
   async downloadBucketObject(bucketId: string, key: string): Promise<Blob> {

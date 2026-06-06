@@ -60,6 +60,7 @@ import {
   BucketFolderRow,
   BucketObjectRow,
   BucketRow,
+  BucketSearchResultRow,
   ContactRow,
   DomainRow,
   ExternalAccountRow,
@@ -134,6 +135,8 @@ type BucketUploadState = {
   completed: number;
   entries: BucketUploadEntry[];
 };
+type BucketSearchScope = "current" | "all";
+type BucketDisplayObjectRow = BucketObjectRow & Partial<Pick<BucketSearchResultRow, "bucketId" | "bucketName" | "bucketBinding" | "match" | "snippet">>;
 
 const AppDialogContext = createContext<AppDialogApi | null>(null);
 
@@ -3013,10 +3016,22 @@ function BucketsView({
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [uploadState, setUploadState] = useState<BucketUploadState | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchScope, setSearchScope] = useState<BucketSearchScope>("current");
+  const [searchIncludesText, setSearchIncludesText] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [searchResults, setSearchResults] = useState<BucketSearchResultRow[] | null>(null);
+  const [searchMeta, setSearchMeta] = useState<{ scanned: number; contentScanned: number; truncated: boolean } | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const dialog = useAppDialog();
   const bucketOptions = bucketOptionsForSelect(buckets);
-  const selectedObject = objects.find((object) => object.key === selectedKey) ?? null;
+  const searchScopeOptions: SelectOption[] = [
+    { value: "current", label: "This bucket" },
+    { value: "all", label: "All buckets" }
+  ];
+  const displayedObjects: BucketDisplayObjectRow[] = searchResults ?? objects;
+  const selectedObject = displayedObjects.find((object) => bucketObjectSelectionId(object) === selectedKey) ?? null;
+  const selectedObjectBucket = selectedObject?.bucketId ? buckets.find((bucket) => bucket.id === selectedObject.bucketId) ?? activeBucket : activeBucket;
   const uploading = Boolean(uploadState?.active);
 
   async function loadObjects(nextPrefix = prefix, nextCursor: string | null = null, append = false) {
@@ -3046,11 +3061,52 @@ function BucketsView({
   useEffect(() => {
     setPrefix("");
     setSelectedKey(null);
+    setSearchResults(null);
+    setSearchMeta(null);
   }, [activeBucket?.id]);
 
   useEffect(() => {
     void loadObjects(prefix, null, false);
   }, [api, activeBucket?.id, prefix]);
+
+  async function runBucketSearch() {
+    const query = searchQuery.trim();
+    if (!api || !activeBucket || query.length < 2) {
+      setSearchResults(null);
+      setSearchMeta(null);
+      if (query.length > 0) onNotice("Search needs at least 2 characters");
+      return;
+    }
+
+    setSearching(true);
+    try {
+      const data = await api.searchBucketObjects({
+        bucketId: activeBucket.id,
+        query,
+        allBuckets: searchScope === "all",
+        includeText: searchIncludesText
+      });
+      setSearchResults(data.results);
+      setSearchMeta({
+        scanned: data.scanned,
+        contentScanned: data.contentScanned,
+        truncated: data.truncated
+      });
+      setSelectedKey(data.results[0] ? bucketObjectSelectionId(data.results[0]) : null);
+      onNotice(data.truncated ? `Search returned first ${data.results.length} results` : `Search found ${data.results.length} result${data.results.length === 1 ? "" : "s"}`);
+    } catch (error) {
+      onNotice(readError(error));
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  function clearBucketSearch() {
+    setSearchQuery("");
+    setSearchResults(null);
+    setSearchMeta(null);
+    setSelectedKey((current) => (current && objects.some((object) => object.key === current) ? current : objects[0]?.key ?? null));
+  }
 
   async function uploadFiles(files: FileList | null) {
     if (!files || files.length === 0 || !api || !activeBucket) return;
@@ -3106,13 +3162,14 @@ function BucketsView({
     }
   }
 
-  async function deleteObject(object: BucketObjectRow) {
-    if (!api || !activeBucket) return;
+  async function deleteObject(object: BucketDisplayObjectRow) {
+    const targetBucket = object.bucketId ? buckets.find((bucket) => bucket.id === object.bucketId) ?? null : activeBucket;
+    if (!api || !targetBucket) return;
     const confirmed = await dialog.confirm({
       title: "Delete R2 object",
       message: (
         <>
-          Delete <strong>{object.key}</strong> from <strong>{activeBucket.name}</strong>? This cannot be undone.
+          Delete <strong>{object.key}</strong> from <strong>{targetBucket.name}</strong>? This cannot be undone.
         </>
       ),
       confirmLabel: "Delete",
@@ -3122,9 +3179,13 @@ function BucketsView({
 
     setLoading(true);
     try {
-      await api.deleteBucketObject(activeBucket.id, object.key);
+      await api.deleteBucketObject(targetBucket.id, object.key);
       setSelectedKey(null);
-      await loadObjects(prefix, null, false);
+      if (searchResults) {
+        await runBucketSearch();
+      } else {
+        await loadObjects(prefix, null, false);
+      }
       onNotice("R2 object deleted");
     } catch (error) {
       onNotice(readError(error));
@@ -3145,7 +3206,7 @@ function BucketsView({
   return (
     <section className="bucket-shell">
       <div className="bucket-toolbar">
-        <div className="bucket-current bucket-select">
+        <div className="bucket-current bucket-select" title={activeBucket?.description ?? "R2 bucket"}>
           <span>Bucket</span>
           <CustomSelect
             value={activeBucket?.id ?? bucketOptions[0]?.value ?? ""}
@@ -3154,8 +3215,49 @@ function BucketsView({
             options={bucketOptions}
             title="Bucket"
           />
-          <small>{activeBucket?.description ?? "R2 bucket"}</small>
         </div>
+        <form
+          className="bucket-searchbar"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void runBucketSearch();
+          }}
+        >
+          <div className="bucket-search-input">
+            <Search size={15} />
+            <input
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Search files, paths, text"
+            />
+          </div>
+          <CustomSelect
+            value={searchScope}
+            onChange={(value) => setSearchScope(value === "all" ? "all" : "current")}
+            options={searchScopeOptions}
+            title="Search scope"
+            className="bucket-search-scope"
+          />
+          <button
+            className={searchIncludesText ? "button mini active" : "button mini"}
+            type="button"
+            onClick={() => setSearchIncludesText((current) => !current)}
+            title="Search inside small text files"
+          >
+            <FileText size={14} />
+            Text
+          </button>
+          <button className="button primary" type="submit" disabled={searching || searchQuery.trim().length < 2}>
+            {searching ? <Loader2 size={15} /> : <Search size={15} />}
+            Search
+          </button>
+          {searchResults ? (
+            <button className="button ghost" type="button" onClick={clearBucketSearch}>
+              <X size={15} />
+              Clear
+            </button>
+          ) : null}
+        </form>
         <div className="bucket-actions">
           <label className={uploading ? "button primary file-button is-loading" : "button primary file-button"}>
             {uploading ? <Loader2 size={15} /> : <FileUp size={15} />}
@@ -3221,33 +3323,44 @@ function BucketsView({
         <section className="bucket-panel object-panel">
           <header>
             <div>
-              <span>Objects</span>
-              <strong>{objects.length} files</strong>
+              <span>{searchResults ? "Search results" : "Objects"}</span>
+              <strong>{searchResults ? `${displayedObjects.length} results` : `${objects.length} files`}</strong>
+              {searchMeta ? (
+                <small>
+                  {searchMeta.scanned} scanned
+                  {searchIncludesText ? ` · ${searchMeta.contentScanned} text files` : ""}
+                  {searchMeta.truncated ? " · more available" : ""}
+                </small>
+              ) : null}
             </div>
             <FileText size={17} />
           </header>
           <div className="bucket-list object-list">
-            {loading && objects.length === 0 ? (
+            {(loading && objects.length === 0) || searching ? (
               <div className="preview-loading compact">
                 <Loader2 size={18} />
-                <span>Loading objects</span>
+                <span>{searching ? "Searching buckets" : "Loading objects"}</span>
               </div>
             ) : null}
-            {objects.map((object) => (
+            {displayedObjects.map((object) => (
               <button
-                className={selectedKey === object.key ? "bucket-row object active" : "bucket-row object"}
-                key={object.key}
+                className={selectedKey === bucketObjectSelectionId(object) ? "bucket-row object active" : "bucket-row object"}
+                key={bucketObjectSelectionId(object)}
                 type="button"
-                onClick={() => setSelectedKey(object.key)}
+                onClick={() => setSelectedKey(bucketObjectSelectionId(object))}
               >
                 <FileText size={14} />
                 <span>{object.name}</span>
                 <b>{formatBytes(object.size)}</b>
-                <small>{object.key}</small>
+                <small>
+                  {object.bucketName ? `${object.bucketName} · ` : ""}
+                  {object.key}
+                </small>
+                {object.snippet ? <em>{object.snippet}</em> : null}
               </button>
             ))}
-            {!loading && objects.length === 0 ? <div className="empty-state">No objects</div> : null}
-            {cursor ? (
+            {!loading && !searching && displayedObjects.length === 0 ? <div className="empty-state">{searchResults ? "No results" : "No objects"}</div> : null}
+            {!searchResults && cursor ? (
               <button className="button ghost wide" type="button" onClick={() => void loadObjects(prefix, cursor, true)} disabled={loading}>
                 Load more
               </button>
@@ -3257,7 +3370,7 @@ function BucketsView({
 
         <BucketObjectPreview
           api={api}
-          bucket={activeBucket}
+          bucket={selectedObjectBucket}
           object={selectedObject}
           onDelete={deleteObject}
           onNotice={onNotice}
@@ -3277,6 +3390,10 @@ function updateBucketUploadEntry(
     ...state,
     entries: state.entries.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry))
   };
+}
+
+function bucketObjectSelectionId(object: BucketDisplayObjectRow): string {
+  return object.bucketId ? `${object.bucketId}:${object.key}` : object.key;
 }
 
 function BucketUploadLog({ state }: { state: BucketUploadState }) {
@@ -3331,8 +3448,8 @@ function BucketObjectPreview({
 }: {
   api: ApiClient | null;
   bucket: BucketRow | null;
-  object: BucketObjectRow | null;
-  onDelete: (object: BucketObjectRow) => Promise<void>;
+  object: BucketDisplayObjectRow | null;
+  onDelete: (object: BucketDisplayObjectRow) => Promise<void>;
   onNotice: (message: string | null) => void;
 }) {
   const [state, setState] = useState<{

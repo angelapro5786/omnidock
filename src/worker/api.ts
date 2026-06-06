@@ -436,6 +436,11 @@ export async function handleApi(
       return json({ ok: true, buckets: listAvailableBuckets(env) });
     }
 
+    if (url.pathname === "/api/buckets/search") {
+      if (request.method !== "GET") return methodNotAllowed();
+      return json(await searchBucketObjects(env, url));
+    }
+
     const bucketObjectsMatch = url.pathname.match(/^\/api\/buckets\/([^/]+)\/objects$/);
     if (bucketObjectsMatch) {
       if (request.method !== "GET") return methodNotAllowed();
@@ -608,6 +613,10 @@ type BucketBinding = {
 };
 
 const reservedBucketDiscoveryBindings = new Set(["ASSETS", "DB", "EMAIL"]);
+const MAX_BUCKET_SEARCH_RESULTS = 100;
+const MAX_BUCKET_SEARCH_SCAN = 1200;
+const MAX_BUCKET_TEXT_SEARCH_FILES = 80;
+const MAX_BUCKET_TEXT_SEARCH_BYTES = 512 * 1024;
 
 function listAvailableBuckets(env: RuntimeEnv): BucketInfo[] {
   const configured = Boolean(env.MAIL_BUCKET);
@@ -633,9 +642,7 @@ function listAvailableBuckets(env: RuntimeEnv): BucketInfo[] {
       binding,
       configured: Boolean(bucket),
       writable: Boolean(bucket),
-      description: bucket
-        ? `Extra R2 bucket binding ${binding}`
-        : `Add an R2 bucket binding named ${binding}`
+      description: bucket ? "Extra storage bucket" : "Bucket binding is not connected"
     });
   }
 
@@ -705,6 +712,123 @@ function getBucketBinding(env: RuntimeEnv, bucketId: string): BucketBinding {
     throw new ApiError(503, "bucket_binding_missing", `R2 binding ${info.binding} is not configured for this Worker.`);
   }
   return { info, bucket };
+}
+
+async function searchBucketObjects(env: RuntimeEnv, url: URL) {
+  const query = (url.searchParams.get("q") ?? "").trim();
+  if (query.length < 2) {
+    throw new ApiError(400, "invalid_search", "Search query must be at least 2 characters.");
+  }
+
+  const includeText = url.searchParams.get("text") === "1";
+  const scope = url.searchParams.get("scope") === "all" ? "all" : "bucket";
+  const bucketId = url.searchParams.get("bucketId")?.trim() || "mail";
+  const queryLower = query.toLowerCase();
+  const bucketBindings =
+    scope === "all"
+      ? listAvailableBuckets(env)
+          .filter((bucket) => bucket.configured)
+          .map((bucket) => ({ info: bucket, bucket: r2BucketFromEnv(env, bucket.binding) }))
+          .filter((item): item is BucketBinding => Boolean(item.bucket))
+      : [getBucketBinding(env, bucketId)];
+
+  const results: Array<ReturnType<typeof serializeR2Object> & {
+    bucketId: string;
+    bucketName: string;
+    bucketBinding: string;
+    match: "path" | "content";
+    snippet: string | null;
+  }> = [];
+  let scanned = 0;
+  let contentScanned = 0;
+  let truncated = false;
+
+  for (const bucket of bucketBindings) {
+    let cursor: string | undefined;
+    do {
+      const page = await bucket.bucket.list({
+        cursor,
+        include: ["httpMetadata"],
+        limit: 200
+      });
+
+      for (const object of page.objects) {
+        scanned += 1;
+        const keyLower = object.key.toLowerCase();
+        const nameLower = filenameFromR2Key(object.key).toLowerCase();
+        const pathMatches = keyLower.includes(queryLower) || nameLower.includes(queryLower);
+        let contentSnippet: string | null = null;
+
+        if (
+          !pathMatches &&
+          includeText &&
+          contentScanned < MAX_BUCKET_TEXT_SEARCH_FILES &&
+          object.size <= MAX_BUCKET_TEXT_SEARCH_BYTES &&
+          isTextSearchCandidate(object)
+        ) {
+          contentScanned += 1;
+          contentSnippet = await findTextMatch(bucket.bucket, object.key, queryLower);
+        }
+
+        if (pathMatches || contentSnippet) {
+          results.push({
+            ...serializeR2Object(object),
+            bucketId: bucket.info.id,
+            bucketName: bucket.info.name,
+            bucketBinding: bucket.info.binding,
+            match: contentSnippet ? "content" : "path",
+            snippet: contentSnippet
+          });
+        }
+
+        if (results.length >= MAX_BUCKET_SEARCH_RESULTS || scanned >= MAX_BUCKET_SEARCH_SCAN) {
+          truncated = true;
+          break;
+        }
+      }
+
+      if (results.length >= MAX_BUCKET_SEARCH_RESULTS || scanned >= MAX_BUCKET_SEARCH_SCAN) {
+        break;
+      }
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor);
+
+    if (results.length >= MAX_BUCKET_SEARCH_RESULTS || scanned >= MAX_BUCKET_SEARCH_SCAN) {
+      break;
+    }
+  }
+
+  return {
+    ok: true,
+    query,
+    scope,
+    bucket: scope === "bucket" ? bucketBindings[0]?.info ?? null : null,
+    results,
+    scanned,
+    contentScanned,
+    truncated
+  };
+}
+
+async function findTextMatch(bucket: R2Bucket, key: string, queryLower: string): Promise<string | null> {
+  const object = await bucket.get(key);
+  if (!object) return null;
+  const text = await object.text();
+  const textLower = text.toLowerCase();
+  const index = textLower.indexOf(queryLower);
+  if (index < 0) return null;
+  const start = Math.max(0, index - 80);
+  const end = Math.min(text.length, index + queryLower.length + 120);
+  const prefix = start > 0 ? "..." : "";
+  const suffix = end < text.length ? "..." : "";
+  return `${prefix}${text.slice(start, end).replace(/\s+/g, " ").trim()}${suffix}`;
+}
+
+function isTextSearchCandidate(object: R2Object): boolean {
+  const contentType = object.httpMetadata?.contentType?.toLowerCase() ?? "";
+  const filename = object.key.toLowerCase();
+  const textExtensions = [".txt", ".md", ".csv", ".json", ".log", ".xml", ".html", ".css", ".js", ".ts", ".tsx", ".yml", ".yaml"];
+  return contentType.startsWith("text/") || contentType.includes("json") || textExtensions.some((extension) => filename.endsWith(extension));
 }
 
 function runtimeBucketName(env: RuntimeEnv): string {
