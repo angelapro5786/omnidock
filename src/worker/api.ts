@@ -116,13 +116,17 @@ export async function handleApi(
         status: "manual"
       });
       await setDefaultDomain(env, domain.id);
-      await createAdminAccount(env, {
-        name: requiredString(body, "name", { min: 2, max: 160 }),
-        email: requiredString(body, "email", { max: 320 }),
-        recoveryEmail,
-        primaryDomain,
-        password: optionalString(body, "password", { max: 256 })
-      });
+      await createAdminAccount(
+        env,
+        {
+          name: requiredString(body, "name", { min: 2, max: 160 }),
+          email: requiredString(body, "email", { max: 320 }),
+          recoveryEmail,
+          primaryDomain,
+          password: optionalString(body, "password", { max: 256 })
+        },
+        request
+      );
       ctx.waitUntil(recordAudit(env, "admin.created", "primary", { primaryDomain }));
       return json({ ok: true }, { status: 201 });
     }

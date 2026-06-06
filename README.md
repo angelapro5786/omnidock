@@ -68,6 +68,7 @@ OmniDock avoids that by generating `DB` and `MAIL_BUCKET` into the deploy config
 
 - `OMNIDOCK_D1_DATABASE_ID`
 - `OMNIDOCK_R2_BUCKET_NAME`
+- `OMNIDOCK_EXTRA_R2_BUCKETS` for any additional R2 buckets
 
 The default Worker script name is `omnidock`. If your deployed Worker uses a different script name, add `WORKER_SCRIPT_NAME` as a build variable with that exact name before deploying.
 
@@ -85,6 +86,7 @@ npm run deploy
 ```
 
 Do not use a bare deploy command of `npx wrangler deploy` for normal Git updates.
+That command cannot safely reconstruct dashboard-only resource bindings. Use the OmniDock deploy script so existing D1/R2 bindings are read, merged, and carried forward.
 
 ## 0. Prepare Cloudflare
 
@@ -169,7 +171,7 @@ These values are build-time values. They are used to deploy the Worker with corr
 | `WORKER_SCRIPT_NAME` | Deployed Worker script name, for example `omnidock` | Optional, only when your script name is different |
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account id | Only if the build token can access multiple accounts |
 
-If these values are missing during a Git update, OmniDock may stop the deploy to protect existing `DB` and `MAIL_BUCKET` bindings from being removed.
+If these values are missing during a Git update, OmniDock may stop the deploy to protect existing `DB` and `MAIL_BUCKET` bindings from being removed. Extra R2 buckets are preserved when they already exist in your private `wrangler.jsonc`, are listed in `OMNIDOCK_EXTRA_R2_BUCKETS`, or can be read from Cloudflare by `node tools/deploy-preserving-bindings.mjs`.
 
 ## Runtime Variables And Secrets
 
@@ -232,6 +234,14 @@ OMNIDOCK_EXTRA_R2_BUCKETS=FILES_BUCKET:my-files-bucket,PRIVATE_BUCKET:private-fi
 ```
 
 The value before `:` is the Worker binding name. The value after `:` is the real R2 bucket name. OmniDock uses that same bucket name in the Buckets dropdown.
+
+For example, if you connect a real bucket named `client-files`, use a Worker binding name like `FILES_BUCKET` and add:
+
+```dotenv
+OMNIDOCK_EXTRA_R2_BUCKETS=FILES_BUCKET:client-files
+```
+
+Keep the Cloudflare deploy command as `node tools/deploy-preserving-bindings.mjs` or `npm run deploy`. A bare `npx wrangler deploy` can remove extra R2 bindings that only exist in the dashboard.
 
 ## First Login
 
@@ -323,6 +333,10 @@ For a private Wrangler-managed install, add your own D1 `database_id` and R2 `bu
   {
     "binding": "MAIL_BUCKET",
     "bucket_name": "omnidock-mail"
+  },
+  {
+    "binding": "FILES_BUCKET",
+    "bucket_name": "client-files"
   }
 ]
 ```

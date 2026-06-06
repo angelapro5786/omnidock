@@ -998,8 +998,8 @@ button:hover:not(:disabled) {
 }
 
 .bucket-shell {
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   gap: 10px;
   height: calc(100vh - 120px);
   min-height: 0;
@@ -1079,6 +1079,7 @@ button:hover:not(:disabled) {
 
 .bucket-pathbar {
   display: flex;
+  flex: 0 0 auto;
   gap: 6px;
   min-height: 40px;
   overflow: auto;
@@ -1088,6 +1089,7 @@ button:hover:not(:disabled) {
 
 .bucket-layout {
   display: grid;
+  flex: 1 1 auto;
   grid-template-columns: minmax(220px, 300px) minmax(320px, 420px) minmax(420px, 1fr);
   gap: 12px;
   min-height: 0;
@@ -1194,6 +1196,142 @@ button:hover:not(:disabled) {
 .bucket-row:hover b,
 .bucket-row:hover small {
   color: var(--hover-text);
+}
+
+.bucket-row.object {
+  grid-template-rows: auto auto;
+  min-height: 48px;
+  padding: 6px 9px;
+}
+
+.bucket-row.object small {
+  overflow: visible;
+  color: var(--muted);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.bucket-row.object:hover {
+  border-color: var(--line-strong);
+  background: var(--control-hover);
+  color: var(--text);
+}
+
+.bucket-row.object:hover b,
+.bucket-row.object:hover small {
+  color: var(--muted);
+}
+
+.bucket-row.object.active:hover {
+  border-color: var(--selected-line);
+  background: var(--selected);
+  color: var(--accent-strong);
+}
+
+.bucket-upload-log {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--ok-line);
+  border-radius: var(--radius);
+  background: var(--ok-soft);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+
+.bucket-upload-log.has-errors {
+  border-color: var(--warn-line);
+  background: var(--warn-soft);
+}
+
+.bucket-upload-log header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.bucket-upload-log header span,
+.bucket-upload-log header b,
+.bucket-upload-entry span,
+.bucket-upload-entry small {
+  color: var(--muted);
+  font: 11px/1.25 var(--mono);
+}
+
+.bucket-upload-log header strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 14px;
+}
+
+.bucket-upload-progress {
+  height: 6px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--control);
+}
+
+.bucket-upload-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ok);
+  transition: width 160ms ease;
+}
+
+.bucket-upload-entries {
+  display: grid;
+  gap: 5px;
+  max-height: 156px;
+  overflow: auto;
+}
+
+.bucket-upload-entry {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.bucket-upload-entry svg {
+  color: var(--muted);
+}
+
+.bucket-upload-entry.uploading svg {
+  color: var(--ok);
+  animation: spin 0.9s linear infinite;
+}
+
+.bucket-upload-entry.done svg {
+  color: var(--ok);
+}
+
+.bucket-upload-entry.error svg,
+.bucket-upload-entry.error small {
+  color: var(--danger);
+}
+
+.bucket-upload-entry div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.bucket-upload-entry strong,
+.bucket-upload-entry span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .bucket-preview-body {

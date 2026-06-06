@@ -1,6 +1,6 @@
 import { handleApi } from "./api";
 import { receiveEmail } from "./email";
-import { RuntimeEnv, json } from "./http";
+import { RuntimeEnv, json, withSecurityHeaders } from "./http";
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -15,14 +15,14 @@ export default {
     if (managementHost && !isLocal && url.hostname !== managementHost) {
       url.hostname = managementHost;
       url.protocol = "https:";
-      return Response.redirect(url.toString(), 308);
+      return withSecurityHeaders(Response.redirect(url.toString(), 308));
     }
 
     if (url.pathname.startsWith("/api/")) {
-      return handleApi(request, runtimeEnv, ctx);
+      return withSecurityHeaders(await handleApi(request, runtimeEnv, ctx));
     }
 
-    return runtimeEnv.ASSETS.fetch(request);
+    return withSecurityHeaders(await runtimeEnv.ASSETS.fetch(request));
   },
 
   async email(message: ForwardableEmailMessage, env: Env): Promise<void> {

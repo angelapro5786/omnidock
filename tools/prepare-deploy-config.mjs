@@ -3,7 +3,7 @@ import fs from "node:fs";
 const CONFIG_PATH = envValue("OMNIDOCK_CONFIG_PATH") || "wrangler.jsonc";
 const PLACEHOLDER_D1_ID = "00000000-0000-0000-0000-000000000000";
 const PLACEHOLDER_R2_BUCKET = "omnidock-mail";
-const RESERVED_R2_BINDINGS = new Set(["ASSETS", "DB", "EMAIL", "MAIL_BUCKET"]);
+const RESERVED_EXTRA_R2_BINDINGS = new Set(["ASSETS", "DB", "EMAIL", "MAIL_BUCKET"]);
 
 const d1DatabaseId = envValue("OMNIDOCK_D1_DATABASE_ID");
 const d1DatabaseName = envValue("OMNIDOCK_D1_DATABASE_NAME") || "omnidock-db";
@@ -28,22 +28,22 @@ if (d1DatabaseId && d1DatabaseId !== PLACEHOLDER_D1_ID) {
   console.warn("OmniDock removed the public DB placeholder from this deploy config.");
 }
 
-const r2Bindings = [];
+let r2Changed = false;
 if (r2BucketName) {
-  r2Bindings.push({
+  r2Changed = upsertR2Bucket(config, {
     binding: "MAIL_BUCKET",
     bucket_name: r2BucketName
-  });
+  }) || r2Changed;
 }
 for (const bucket of extraR2Buckets) {
-  r2Bindings.push(bucket);
+  r2Changed = upsertR2Bucket(config, bucket) || r2Changed;
 }
 
-if (r2Bindings.length > 0) {
-  config.r2_buckets = r2Bindings;
+if (r2Changed) {
   syncR2DisplayVars(config);
   changed = true;
 } else if (removeR2Placeholder(config)) {
+  syncR2DisplayVars(config);
   changed = true;
   console.warn("OmniDock removed the public MAIL_BUCKET placeholder from this deploy config.");
 } else if (syncR2DisplayVars(config)) {
@@ -83,11 +83,26 @@ function removeR2Placeholder(config) {
   return true;
 }
 
+function upsertR2Bucket(config, bucket) {
+  if (!bucket?.binding || !bucket.bucket_name) return false;
+  if (RESERVED_EXTRA_R2_BINDINGS.has(bucket.binding) && bucket.binding !== "MAIL_BUCKET") return false;
+
+  const buckets = Array.isArray(config.r2_buckets) ? config.r2_buckets : [];
+  const current = buckets.find((item) => item?.binding === bucket.binding);
+  if (current && JSON.stringify(current) === JSON.stringify(bucket)) return false;
+
+  config.r2_buckets = [
+    ...buckets.filter((item) => item?.binding !== bucket.binding),
+    bucket
+  ];
+  return true;
+}
+
 function syncR2DisplayVars(config) {
   const buckets = Array.isArray(config.r2_buckets) ? config.r2_buckets : [];
   const mailBucket = buckets.find((item) => item?.binding === "MAIL_BUCKET" && item.bucket_name && item.bucket_name !== PLACEHOLDER_R2_BUCKET);
   const extraBuckets = buckets
-    .filter((item) => item?.binding && item.bucket_name && !RESERVED_R2_BINDINGS.has(item.binding))
+    .filter((item) => item?.binding && item.bucket_name && !RESERVED_EXTRA_R2_BINDINGS.has(item.binding))
     .map((item) => `${item.binding}:${item.bucket_name}`);
   let changed = false;
 
@@ -130,7 +145,7 @@ function parseExtraR2Buckets(value) {
     if (!separator) continue;
     const binding = item.slice(0, item.indexOf(separator)).trim();
     const bucketName = item.slice(item.indexOf(separator) + 1).trim();
-    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(binding) || !bucketName || seen.has(binding) || RESERVED_R2_BINDINGS.has(binding)) continue;
+    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(binding) || !bucketName || seen.has(binding) || RESERVED_EXTRA_R2_BINDINGS.has(binding)) continue;
     seen.add(binding);
     buckets.push({ binding, bucket_name: bucketName });
   }

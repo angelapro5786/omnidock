@@ -30,6 +30,7 @@ export function json(data: unknown, init: ResponseInit = {}): Response {
   const headers = new Headers(init.headers);
   headers.set("content-type", "application/json; charset=utf-8");
   headers.set("cache-control", "no-store");
+  applySecurityHeaders(headers);
 
   return new Response(JSON.stringify(data), {
     ...init,
@@ -38,7 +39,41 @@ export function json(data: unknown, init: ResponseInit = {}): Response {
 }
 
 export function noContent(): Response {
-  return new Response(null, { status: 204 });
+  return withSecurityHeaders(new Response(null, { status: 204 }));
+}
+
+export function withSecurityHeaders(response: Response): Response {
+  const headers = new Headers(response.headers);
+  applySecurityHeaders(headers);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
+  });
+}
+
+function applySecurityHeaders(headers: Headers): void {
+  headers.set("x-content-type-options", "nosniff");
+  headers.set("referrer-policy", "no-referrer");
+  headers.set("x-frame-options", "DENY");
+  headers.set("cross-origin-opener-policy", "same-origin");
+  headers.set("permissions-policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()");
+  headers.set(
+    "content-security-policy",
+    [
+      "default-src 'self'",
+      "script-src 'self'",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob:",
+      "font-src 'self' data:",
+      "connect-src 'self'",
+      "frame-src 'self' blob:",
+      "object-src 'none'",
+      "base-uri 'none'",
+      "form-action 'self'",
+      "frame-ancestors 'none'"
+    ].join("; ")
+  );
 }
 
 export async function readJson(request: Request): Promise<Record<string, unknown>> {

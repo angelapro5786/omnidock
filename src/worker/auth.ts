@@ -7,6 +7,9 @@ const encoder = new TextEncoder();
 const PASSWORD_ITERATIONS = 100_000;
 const RESET_TOKEN_BYTES = 32;
 const RESET_TOKEN_TTL_MS = 30 * 60 * 1000;
+const AUTH_FAILURE_WINDOW_MS = 15 * 60 * 1000;
+const AUTH_LOCK_MS = 15 * 60 * 1000;
+const AUTH_MAX_FAILURES = 5;
 
 type AdminAuthRow = {
   password_hash: string;
@@ -16,6 +19,12 @@ type AdminAuthRow = {
   admin_email: string | null;
   reset_token_hash: string | null;
   reset_expires_at: string | null;
+};
+
+type AuthAttemptRow = {
+  failures: number;
+  locked_until: string | null;
+  updated_at: string;
 };
 
 export type SetupStatus = {
@@ -30,13 +39,16 @@ export async function requireAdmin(request: Request, env: RuntimeEnv): Promise<v
   const record = await getAdminAuth(env);
 
   if (!record) {
-    await bootstrapPassword(env, provided);
+    await bootstrapPassword(env, provided, request);
     return;
   }
 
+  await enforceAuthRateLimit(env, request);
   if (!provided || !(await verifyPassword(provided, record))) {
+    await recordFailedAuthAttempt(env, request);
     throw new ApiError(401, "unauthorized", "Invalid password");
   }
+  await clearAuthAttempt(env, request);
 }
 
 export async function getSetupStatus(env: RuntimeEnv): Promise<SetupStatus> {
@@ -58,7 +70,8 @@ export async function getSetupStatus(env: RuntimeEnv): Promise<SetupStatus> {
 
 export async function createAdminAccount(
   env: RuntimeEnv,
-  input: { name: string; email: string; recoveryEmail: string; primaryDomain: string; password?: string | null }
+  input: { name: string; email: string; recoveryEmail: string; primaryDomain: string; password?: string | null },
+  request?: Request
 ): Promise<void> {
   await ensureDatabaseSchema(env);
   const existing = await getAdminAuth(env);
@@ -75,8 +88,17 @@ export async function createAdminAccount(
   if (!password) {
     throw new ApiError(409, "admin_password_secret_missing", "Add ADMIN_PASSWORD as a Worker secret first.");
   }
+  if (request) {
+    await enforceAuthRateLimit(env, request);
+  }
   if (!setupPassword || !(await securePlainEqual(setupPassword, password))) {
+    if (request) {
+      await recordFailedAuthAttempt(env, request);
+    }
     throw new ApiError(401, "unauthorized", "Invalid setup password");
+  }
+  if (request) {
+    await clearAuthAttempt(env, request);
   }
   validatePassword(password);
 
@@ -185,17 +207,64 @@ function extractPassword(request: Request): string | null {
   return null;
 }
 
-async function bootstrapPassword(env: RuntimeEnv, provided: string | null): Promise<void> {
+async function bootstrapPassword(env: RuntimeEnv, provided: string | null, request: Request): Promise<void> {
   const bootstrap = configuredAdminPassword(env);
   if (!bootstrap) {
     throw new ApiError(409, "setup_required", "Create the first admin account before logging in.");
   }
 
+  await enforceAuthRateLimit(env, request);
   if (!provided || !(await securePlainEqual(provided, bootstrap))) {
+    await recordFailedAuthAttempt(env, request);
     throw new ApiError(401, "unauthorized", "Invalid password");
   }
 
   await setAdminPassword(env, bootstrap);
+  await clearAuthAttempt(env, request);
+}
+
+async function enforceAuthRateLimit(env: RuntimeEnv, request: Request): Promise<void> {
+  const row = await getAuthAttempt(env, await authAttemptKey(request));
+  if (!row?.locked_until) return;
+
+  if (Date.parse(row.locked_until) > Date.now()) {
+    throw new ApiError(429, "auth_locked", "Too many failed login attempts. Try again later.");
+  }
+}
+
+async function recordFailedAuthAttempt(env: RuntimeEnv, request: Request): Promise<void> {
+  const key = await authAttemptKey(request);
+  const existing = await getAuthAttempt(env, key);
+  const now = Date.now();
+  const recent = existing?.updated_at ? now - Date.parse(existing.updated_at) <= AUTH_FAILURE_WINDOW_MS : false;
+  const failures = recent && existing ? existing.failures + 1 : 1;
+  const lockedUntil = failures >= AUTH_MAX_FAILURES ? new Date(now + AUTH_LOCK_MS).toISOString() : null;
+  const updatedAt = new Date(now).toISOString();
+
+  await env.DB.prepare(
+    `INSERT INTO auth_attempts (key, failures, locked_until, updated_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET
+       failures = excluded.failures,
+       locked_until = excluded.locked_until,
+       updated_at = excluded.updated_at`
+  )
+    .bind(key, failures, lockedUntil, updatedAt)
+    .run();
+}
+
+async function clearAuthAttempt(env: RuntimeEnv, request: Request): Promise<void> {
+  await env.DB.prepare("DELETE FROM auth_attempts WHERE key = ?").bind(await authAttemptKey(request)).run();
+}
+
+async function getAuthAttempt(env: RuntimeEnv, key: string): Promise<AuthAttemptRow | null> {
+  return (await env.DB.prepare("SELECT failures, locked_until, updated_at FROM auth_attempts WHERE key = ?").bind(key).first<AuthAttemptRow>()) ?? null;
+}
+
+async function authAttemptKey(request: Request): Promise<string> {
+  const forwarded = request.headers.get("cf-connecting-ip") ?? request.headers.get("x-forwarded-for") ?? "unknown";
+  const ip = forwarded.split(",")[0]?.trim() || "unknown";
+  return `auth:${await sha256Base64(ip)}`;
 }
 
 async function getAdminAuth(env: RuntimeEnv): Promise<AdminAuthRow | null> {

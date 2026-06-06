@@ -4,6 +4,8 @@ import fs from "node:fs";
 const CONFIG_PATH = "wrangler.jsonc";
 const GENERATED_CONFIG_PATH = ".wrangler.omnidock.generated.jsonc";
 const CLOUDFLARE_API = "https://api.cloudflare.com/client/v4";
+const PLACEHOLDER_D1_ID = "00000000-0000-0000-0000-000000000000";
+const PLACEHOLDER_R2_BUCKET = "omnidock-mail";
 const RESERVED_R2_BINDINGS = new Set(["ASSETS", "DB", "EMAIL", "MAIL_BUCKET"]);
 
 const baseConfig = readJsonc(CONFIG_PATH);
@@ -13,7 +15,7 @@ generatedConfig.keep_vars = true;
 const token = process.env.CLOUDFLARE_API_TOKEN?.trim();
 const workerName = envValue("WORKER_SCRIPT_NAME") || generatedConfig.name;
 generatedConfig.name = workerName;
-const preservedResourceBindings = new Set();
+const preservedResourceBindings = configuredResourceBindings(generatedConfig);
 const d1DatabaseId = envValue("OMNIDOCK_D1_DATABASE_ID");
 const d1DatabaseName = envValue("OMNIDOCK_D1_DATABASE_NAME") || "omnidock-db";
 const r2BucketName = envValue("OMNIDOCK_R2_BUCKET_NAME");
@@ -121,7 +123,26 @@ function mergeCloudflareBindings(config, bindings) {
   return preserved;
 }
 
+function configuredResourceBindings(config) {
+  const names = new Set();
+  const d1 = Array.isArray(config.d1_databases)
+    ? config.d1_databases.find((item) => item?.binding === "DB" && item.database_id && item.database_id !== PLACEHOLDER_D1_ID)
+    : null;
+  if (d1) {
+    names.add("DB");
+  }
+
+  const r2Buckets = Array.isArray(config.r2_buckets) ? config.r2_buckets : [];
+  for (const bucket of r2Buckets) {
+    if (!bucket?.binding || !bucket.bucket_name || bucket.bucket_name === PLACEHOLDER_R2_BUCKET) continue;
+    names.add(bucket.binding);
+  }
+
+  return names;
+}
+
 function upsertR2Bucket(config, bucket) {
+  if (!bucket?.binding || !bucket.bucket_name) return;
   const buckets = Array.isArray(config.r2_buckets) ? config.r2_buckets : [];
   const next = buckets.filter((item) => item?.binding !== bucket.binding);
   next.push(bucket);

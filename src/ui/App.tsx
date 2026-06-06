@@ -120,6 +120,20 @@ type ContactParseResult = {
   duplicateEmails: number;
   ignoredRows: number;
 };
+type BucketUploadEntry = {
+  id: string;
+  name: string;
+  key: string;
+  size: number;
+  status: "queued" | "uploading" | "done" | "error";
+  message?: string;
+};
+type BucketUploadState = {
+  active: boolean;
+  total: number;
+  completed: number;
+  entries: BucketUploadEntry[];
+};
 
 const AppDialogContext = createContext<AppDialogApi | null>(null);
 
@@ -353,6 +367,14 @@ function AppContent() {
     document.documentElement.dataset.palette = palette;
     localStorage.setItem(PALETTE_KEY, palette);
   }, [palette]);
+
+  useEffect(() => {
+    if (!initialResetToken) return;
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has("token")) return;
+    url.searchParams.delete("token");
+    window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
+  }, [initialResetToken]);
 
   const clearPrivateState = useCallback(() => {
     setBootstrap(null);
@@ -2990,11 +3012,12 @@ function BucketsView({
   const [objects, setObjects] = useState<BucketObjectRow[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  const [uploadState, setUploadState] = useState<BucketUploadState | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const dialog = useAppDialog();
   const bucketOptions = bucketOptionsForSelect(buckets);
   const selectedObject = objects.find((object) => object.key === selectedKey) ?? null;
+  const uploading = Boolean(uploadState?.active);
 
   async function loadObjects(nextPrefix = prefix, nextCursor: string | null = null, append = false) {
     if (!api || !activeBucket) return;
@@ -3031,17 +3054,55 @@ function BucketsView({
 
   async function uploadFiles(files: FileList | null) {
     if (!files || files.length === 0 || !api || !activeBucket) return;
-    setUploading(true);
+    const selectedFiles = Array.from(files);
+    const entries = selectedFiles.map((file, index) => ({
+      id: `${file.name}-${file.size}-${file.lastModified}-${index}`,
+      name: file.name || "upload",
+      key: buildR2UploadKey(prefix, file.name),
+      size: file.size,
+      status: "queued" as const
+    }));
+    setUploadState({ active: true, total: selectedFiles.length, completed: 0, entries });
+    onNotice(null);
+    let uploaded = 0;
+    let failed = 0;
+
     try {
-      for (const file of Array.from(files)) {
-        await api.uploadBucketObject(activeBucket.id, buildR2UploadKey(prefix, file.name), file);
+      for (const [index, file] of selectedFiles.entries()) {
+        const entry = entries[index];
+        setUploadState((current) => updateBucketUploadEntry(current, entry.id, { status: "uploading", message: "Uploading" }));
+        try {
+          await api.uploadBucketObject(activeBucket.id, entry.key, file);
+          uploaded += 1;
+          setUploadState((current) =>
+            updateBucketUploadEntry(current, entry.id, {
+              status: "done",
+              message: `Uploaded ${formatBytes(file.size)}`
+            })
+          );
+        } catch (error) {
+          failed += 1;
+          setUploadState((current) =>
+            updateBucketUploadEntry(current, entry.id, {
+              status: "error",
+              message: readError(error)
+            })
+          );
+        } finally {
+          setUploadState((current) => (current ? { ...current, completed: Math.min(current.completed + 1, current.total) } : current));
+        }
       }
-      await loadObjects(prefix, null, false);
-      onNotice(`Uploaded ${files.length} object${files.length === 1 ? "" : "s"}`);
-    } catch (error) {
-      onNotice(readError(error));
+
+      if (uploaded > 0) {
+        await loadObjects(prefix, null, false);
+      }
+      onNotice(
+        failed > 0
+          ? `Uploaded ${uploaded} object${uploaded === 1 ? "" : "s"}, ${failed} failed`
+          : `Uploaded ${uploaded} object${uploaded === 1 ? "" : "s"}`
+      );
     } finally {
-      setUploading(false);
+      setUploadState((current) => (current ? { ...current, active: false } : current));
     }
   }
 
@@ -3115,6 +3176,8 @@ function BucketsView({
           </button>
         </div>
       </div>
+
+      {uploadState ? <BucketUploadLog state={uploadState} /> : null}
 
       <div className="bucket-pathbar">
         <button className={!prefix ? "button mini active" : "button mini"} type="button" onClick={() => setPrefix("")}>
@@ -3199,6 +3262,61 @@ function BucketsView({
           onDelete={deleteObject}
           onNotice={onNotice}
         />
+      </div>
+    </section>
+  );
+}
+
+function updateBucketUploadEntry(
+  state: BucketUploadState | null,
+  id: string,
+  patch: Partial<BucketUploadEntry>
+): BucketUploadState | null {
+  if (!state) return state;
+  return {
+    ...state,
+    entries: state.entries.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry))
+  };
+}
+
+function BucketUploadLog({ state }: { state: BucketUploadState }) {
+  const done = state.completed;
+  const percent = state.total > 0 ? Math.round((done / state.total) * 100) : 0;
+  const hasErrors = state.entries.some((entry) => entry.status === "error");
+
+  return (
+    <section className={hasErrors ? "bucket-upload-log has-errors" : "bucket-upload-log"}>
+      <header>
+        <div>
+          <span>{state.active ? "Uploading" : hasErrors ? "Upload completed with errors" : "Upload complete"}</span>
+          <strong>
+            {done}/{state.total} files
+          </strong>
+        </div>
+        <b>{percent}%</b>
+      </header>
+      <div className="bucket-upload-progress" aria-hidden="true">
+        <span style={{ width: `${percent}%` }} />
+      </div>
+      <div className="bucket-upload-entries">
+        {state.entries.map((entry) => (
+          <div className={`bucket-upload-entry ${entry.status}`} key={entry.id}>
+            {entry.status === "uploading" ? (
+              <Loader2 size={14} />
+            ) : entry.status === "done" ? (
+              <CheckCircle2 size={14} />
+            ) : entry.status === "error" ? (
+              <AlertTriangle size={14} />
+            ) : (
+              <Circle size={14} />
+            )}
+            <div>
+              <strong>{entry.name}</strong>
+              <span>{entry.key}</span>
+            </div>
+            <small>{entry.message ?? formatBytes(entry.size)}</small>
+          </div>
+        ))}
       </div>
     </section>
   );

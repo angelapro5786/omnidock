@@ -8,7 +8,8 @@ const CURRENT_MIGRATIONS = [
   "0005_default_domain.sql",
   "0006_admin_profile_reset.sql",
   "0007_external_accounts.sql",
-  "0008_contact_phone.sql"
+  "0008_contact_phone.sql",
+  "0009_auth_attempts.sql"
 ];
 
 let schemaReady: Promise<void> | null = null;
@@ -209,6 +210,12 @@ const schemaStatements = [
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`,
+  `CREATE TABLE IF NOT EXISTS auth_attempts (
+    key TEXT PRIMARY KEY,
+    failures INTEGER NOT NULL DEFAULT 0,
+    locked_until TEXT,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
   `CREATE TABLE IF NOT EXISTS d1_migrations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT UNIQUE,
@@ -231,5 +238,6 @@ const indexStatements = [
   "CREATE INDEX IF NOT EXISTS idx_external_accounts_provider ON external_accounts(provider)",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_domains_default ON domains(is_default) WHERE is_default = 1",
   "CREATE INDEX IF NOT EXISTS idx_admin_auth_email ON admin_auth(admin_email)",
-  "CREATE INDEX IF NOT EXISTS idx_admin_auth_reset ON admin_auth(reset_token_hash)"
+  "CREATE INDEX IF NOT EXISTS idx_admin_auth_reset ON admin_auth(reset_token_hash)",
+  "CREATE INDEX IF NOT EXISTS idx_auth_attempts_locked ON auth_attempts(locked_until)"
 ];
