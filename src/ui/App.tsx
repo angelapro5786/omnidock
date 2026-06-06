@@ -697,12 +697,20 @@ function ConfigurationScreen({
         <div className="requirement-list" aria-label="Required Cloudflare configuration">
           {requirements.map((item) => (
             <div
-              className={item.required ? "requirement-row is-required" : "requirement-row is-optional"}
+              className={[
+                "requirement-row",
+                item.configured ? "is-configured" : item.required ? "is-required" : "is-optional"
+              ].join(" ")}
               key={`${item.kind}:${item.name}`}
             >
+              <span className="requirement-status" aria-label={item.configured ? "Configured" : "Missing"}>
+                {item.configured ? <CheckCircle2 size={15} /> : <AlertTriangle size={14} />}
+              </span>
               <div className="requirement-meta">
                 <span className="requirement-kind">{item.kind}</span>
-                <span className="requirement-priority">{item.required ? "required" : "optional"}</span>
+                <span className="requirement-priority">
+                  {item.configured ? "added" : item.required ? "required" : "optional"}
+                </span>
               </div>
               <button
                 className="requirement-name"

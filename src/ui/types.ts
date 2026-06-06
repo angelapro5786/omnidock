@@ -120,6 +120,7 @@ export type RuntimeRequirement = {
   kind: "binding" | "secret";
   name: string;
   required: boolean;
+  configured: boolean;
   message: string;
 };
 

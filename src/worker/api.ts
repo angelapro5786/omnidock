@@ -74,7 +74,7 @@ export async function handleApi(
       return json({
         ok: true,
         ...setup,
-        configurationReady: requirements.every((item) => !item.required),
+        configurationReady: requirements.every((item) => item.configured || !item.required),
         requirements,
         primaryDomain: configuredPrimaryDomain(env),
         passwordFromSecret: Boolean(configuredAdminPassword(env))
@@ -89,7 +89,7 @@ export async function handleApi(
         throw new ApiError(409, "setup_complete", "Admin account is already configured");
       }
       const requirements = runtimeRequirements(env, setup.setupRequired);
-      const missingRequired = requirements.filter((item) => item.required);
+      const missingRequired = requirements.filter((item) => item.required && !item.configured);
       if (missingRequired.length > 0) {
         throw new ApiError(
           409,

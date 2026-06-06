@@ -70,11 +70,11 @@ export function runtimeRequirements(env: RuntimeEnv, setupRequired: boolean): Ru
     {
       kind: "secret",
       name: "CLOUDFLARE_API_TOKEN",
-      required: false,
+      required: true,
       configured: Boolean(env.CLOUDFLARE_API_TOKEN),
       message: env.CLOUDFLARE_API_TOKEN
         ? "Cloudflare API token secret is configured."
-        : "Optional: add this to enable Cloudflare sync and routing automation."
+        : "Add CLOUDFLARE_API_TOKEN to enable Cloudflare sync and routing automation."
     },
     {
       kind: "secret",

@@ -1487,7 +1487,7 @@ button:hover:not(:disabled) {
 
 .requirement-row {
   display: grid;
-  grid-template-columns: 82px minmax(0, 1fr) 32px;
+  grid-template-columns: 24px 82px minmax(0, 1fr) 32px;
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -1496,6 +1496,22 @@ button:hover:not(:disabled) {
   border-radius: var(--radius);
   background: var(--panel-alt);
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--line) 52%, transparent);
+}
+
+.requirement-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--control);
+  color: var(--warn);
+}
+
+.requirement-row.is-configured .requirement-status {
+  color: var(--accent-strong);
 }
 
 .requirement-row.is-optional {
@@ -1536,6 +1552,10 @@ button:hover:not(:disabled) {
 
 .requirement-row.is-required .requirement-priority {
   color: var(--warn);
+}
+
+.requirement-row.is-configured .requirement-priority {
+  color: var(--accent-strong);
 }
 
 .requirement-row.is-optional .requirement-priority {
