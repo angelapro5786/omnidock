@@ -13,9 +13,9 @@ const token = process.env.CLOUDFLARE_API_TOKEN?.trim();
 const workerName = envValue("WORKER_SCRIPT_NAME") || generatedConfig.name;
 generatedConfig.name = workerName;
 const preservedResourceBindings = new Set();
-const d1DatabaseId = envValue("OMNIDOCK_D1_DATABASE_ID", "EMAILFOX_D1_DATABASE_ID");
-const d1DatabaseName = envValue("OMNIDOCK_D1_DATABASE_NAME", "EMAILFOX_D1_DATABASE_NAME") || "omnidock-db";
-const r2BucketName = envValue("OMNIDOCK_R2_BUCKET_NAME", "EMAILFOX_R2_BUCKET_NAME");
+const d1DatabaseId = envValue("OMNIDOCK_D1_DATABASE_ID");
+const d1DatabaseName = envValue("OMNIDOCK_D1_DATABASE_NAME") || "omnidock-db";
+const r2BucketName = envValue("OMNIDOCK_R2_BUCKET_NAME");
 
 if (d1DatabaseId) {
   generatedConfig.d1_databases = [
@@ -57,7 +57,7 @@ if (token && workerName) {
 
 fs.writeFileSync(GENERATED_CONFIG_PATH, `${JSON.stringify(generatedConfig, null, 2)}\n`);
 
-const dryRun = envFlag("OMNIDOCK_DEPLOY_DRY_RUN") || envFlag("EMAILFOX_DEPLOY_DRY_RUN");
+const dryRun = envFlag("OMNIDOCK_DEPLOY_DRY_RUN");
 const args = ["wrangler", "deploy", "--config", GENERATED_CONFIG_PATH, "--keep-vars"];
 if (dryRun) {
   args.push("--dry-run");
@@ -67,7 +67,7 @@ const requiredResourceBindings = ["DB", "MAIL_BUCKET"];
 const missingResourceBindings = requiredResourceBindings.filter((binding) => !preservedResourceBindings.has(binding));
 if (missingResourceBindings.length > 0) {
   const existingWorker = remoteWorkerHasDeployments(workerName);
-  const allowUnboundDeploy = envFlag("OMNIDOCK_ALLOW_UNBOUND_DEPLOY") || envFlag("EMAILFOX_ALLOW_UNBOUND_DEPLOY");
+  const allowUnboundDeploy = envFlag("OMNIDOCK_ALLOW_UNBOUND_DEPLOY");
 
   if ((existingWorker === true || existingWorker === null) && !allowUnboundDeploy) {
     console.error("OmniDock stopped this deploy before Wrangler could remove dashboard resource bindings.");
@@ -75,7 +75,6 @@ if (missingResourceBindings.length > 0) {
     console.error("Add OMNIDOCK_D1_DATABASE_ID and OMNIDOCK_R2_BUCKET_NAME as Cloudflare build/deploy variables or secrets, then deploy again.");
     console.error("Alternatively expose CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID to the build so OmniDock can read existing Worker bindings.");
     console.error("Set OMNIDOCK_ALLOW_UNBOUND_DEPLOY=1 only for an intentional first deploy without D1/R2 bindings.");
-    console.error("Legacy EMAILFOX_* variable names are still accepted for existing installs.");
     process.exit(1);
   }
 
@@ -262,8 +261,8 @@ function firstLine(value) {
   return value.split(/\r?\n/).find((line) => line.trim())?.trim() ?? value;
 }
 
-function envValue(name, legacyName) {
-  return process.env[name]?.trim() || (legacyName ? process.env[legacyName]?.trim() : "") || "";
+function envValue(name) {
+  return process.env[name]?.trim() || "";
 }
 
 function envFlag(name) {

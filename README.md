@@ -4,7 +4,7 @@ OmniDock is an open-source, self-hosted email operations dashboard for Cloudflar
 
 It turns a Cloudflare account into a compact Linux-style work dock for domain email, support inboxes, contacts, signatures, attachments, and R2 files.
 
-Website: [omnidock.com](https://omnidock.com)
+Website: [omnidock.org](https://omnidock.org)
 
 ## What It Does
 
@@ -69,9 +69,7 @@ OmniDock avoids that by generating `DB` and `MAIL_BUCKET` into the deploy config
 - `OMNIDOCK_D1_DATABASE_ID`
 - `OMNIDOCK_R2_BUCKET_NAME`
 
-The legacy `EMAILFOX_D1_DATABASE_ID`, `EMAILFOX_D1_DATABASE_NAME`, and `EMAILFOX_R2_BUCKET_NAME` names are still accepted for existing installs, but new installs should use `OMNIDOCK_*`.
-
-New installs use the Worker script name `omnidock`. If you are updating an older install and want to keep the old Worker script name, add `WORKER_SCRIPT_NAME` as a build variable with the current deployed Worker name before deploying.
+The default Worker script name is `omnidock`. If your deployed Worker uses a different script name, add `WORKER_SCRIPT_NAME` as a build variable with that exact name before deploying.
 
 Use these Cloudflare Workers Builds commands:
 
@@ -167,7 +165,7 @@ These values are build-time values. They are used to deploy the Worker with corr
 | `OMNIDOCK_D1_DATABASE_ID` | Your D1 database id | Yes |
 | `OMNIDOCK_R2_BUCKET_NAME` | Your R2 bucket name, for example `omnidock-mail` | Yes |
 | `OMNIDOCK_D1_DATABASE_NAME` | D1 display name, for example `omnidock-db` | Optional |
-| `WORKER_SCRIPT_NAME` | Current deployed Worker script name, for example `omnidock` | Optional, useful when preserving an older Worker name |
+| `WORKER_SCRIPT_NAME` | Deployed Worker script name, for example `omnidock` | Optional, only when your script name is different |
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account id | Only if the build token can access multiple accounts |
 
 If these values are missing during a Git update, OmniDock may stop the deploy to protect existing `DB` and `MAIL_BUCKET` bindings from being removed.
