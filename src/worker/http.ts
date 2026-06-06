@@ -4,6 +4,7 @@ export type RuntimeEnv = Env & {
   CLOUDFLARE_API_TOKEN?: string;
   DOMAINS?: string;
   ENABLE_DEV_SEED?: string;
+  MANAGEMENT_HOST?: string;
   PRIMARY_DOMAIN?: string;
   PASSWORD_RESET_FROM?: string;
 };
