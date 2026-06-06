@@ -15,16 +15,13 @@
   },
   "cloudflare": {
     "label": "Emailfox",
-    "products": ["Workers", "D1", "R2", "Email Routing", "Email Sending"],
+    "products": ["Workers", "D1", "R2"],
     "bindings": {
       "DOMAINS": {
         "description": "Required. Main email domain to manage first, for example `example.com`. Emailfox will create the first domain as the default during setup. You may enter more domains later in the app."
       },
-      "ADMIN_PASSWORD_BOOTSTRAP": {
-        "description": "Optional legacy bootstrap password for automation only. Normal installs should leave this unset and create the first admin from the Emailfox setup screen after deploy."
-      },
       "CLOUDFLARE_API_TOKEN": {
-        "description": "Required secret. Cloudflare API token used for inventory sync and Email Routing rule management. Recommended scopes: Account Read, Account Email Sending Read, Zone Read, Zone Email Routing Read/Edit, Workers Scripts Read."
+        "description": "Required runtime secret. This is not the Workers Builds API token dropdown. Paste a Cloudflare API token used by Emailfox for inventory sync and Email Routing rule management. Recommended scopes: Account Read, Account Email Sending Read, Zone Read, Zone Email Routing Read/Edit, Workers Scripts Read."
       },
       "DB": {
         "description": "Required D1 database. Keep the generated `database_id` in installed copies so updates reuse the same database."
@@ -32,14 +29,8 @@
       "MAIL_BUCKET": {
         "description": "Required R2 bucket for raw messages and attachments. Keep the generated bucket name in installed copies so updates reuse the same bucket."
       },
-      "MANAGEMENT_HOST": {
-        "description": "Optional custom dashboard hostname. Leave blank for the generated workers.dev URL; set it later if you add a custom domain such as mail.example.com."
-      },
-      "CLOUDFLARE_ACCOUNT_ID": {
-        "description": "Optional Cloudflare account id. Leave blank if your API token can access exactly one Cloudflare account."
-      },
-      "PASSWORD_RESET_FROM": {
-        "description": "Optional verified sender address for password reset emails. If blank, Emailfox uses the admin email address."
+      "WORKER_SCRIPT_NAME": {
+        "description": "Required. Keep this equal to the Worker script name chosen in Cloudflare's deploy screen. The default is `emailfox`."
       }
     }
   },

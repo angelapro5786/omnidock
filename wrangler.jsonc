@@ -15,12 +15,7 @@
   "vars": {
     // Required for one-click deploy. Replace example.com in the Deploy to Cloudflare setup form.
     "DOMAINS": "example.com",
-    // Optional. Leave empty for workers.dev. Set to a custom dashboard host such as "mail.example.com".
-    "MANAGEMENT_HOST": "",
-    // Optional. Leave empty when the API token can access exactly one Cloudflare account.
-    "CLOUDFLARE_ACCOUNT_ID": "",
-    // Optional. Verified sender address for password reset emails. Defaults to the admin email.
-    "PASSWORD_RESET_FROM": "",
+    // Required for Email Routing rule creation. Keep this equal to the Worker script name chosen in deploy.
     "WORKER_SCRIPT_NAME": "emailfox"
   },
   "secrets": {

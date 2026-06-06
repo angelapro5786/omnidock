@@ -118,15 +118,17 @@ Recommended permissions:
 - Zone > Email Routing > Edit
 - Account > Workers Scripts > Read
 
-If your token can access exactly one Cloudflare account, leave `CLOUDFLARE_ACCOUNT_ID` blank. If it can access multiple accounts, set `CLOUDFLARE_ACCOUNT_ID` to the account id you want Emailfox to use.
+If your token can access exactly one Cloudflare account, Emailfox detects that account automatically. If your token can access multiple accounts, add `CLOUDFLARE_ACCOUNT_ID` later as an advanced non-secret Worker variable in your private installed copy.
 
 ## Deploy Flow Inputs
 
 During one-click deploy, Cloudflare reads:
 
 - `wrangler.jsonc` for Worker, D1, R2, assets, and env vars
-- `.dev.vars.example` for required secrets such as `CLOUDFLARE_API_TOKEN`
+- `.dev.vars.example` and `.env.example` for required secrets such as `CLOUDFLARE_API_TOKEN`
 - `package.json` scripts and Cloudflare binding descriptions
+
+The `API token` dropdown in Cloudflare's deploy screen is for Workers Builds, meaning the token Cloudflare uses to build and deploy this repository. It is separate from Emailfox's `CLOUDFLARE_API_TOKEN` runtime secret. Emailfox's token should appear as a named secret/input field, not inside that dropdown.
 
 You will be asked to configure:
 
@@ -136,7 +138,6 @@ You will be asked to configure:
 | `CLOUDFLARE_API_TOKEN` | Yes | Used for Cloudflare sync and routing rule creation. |
 | `ADMIN_PASSWORD_BOOTSTRAP` | No | Legacy/automation fallback. Leave blank for normal first-screen admin creation. |
 | `MANAGEMENT_HOST` | No | Leave blank for the generated `workers.dev` host. Set later for a custom domain. |
-| `CLOUDFLARE_ACCOUNT_ID` | No | Leave blank unless the API token can access multiple accounts. |
 | `PASSWORD_RESET_FROM` | No | Verified sender for password reset emails. If blank, Emailfox uses the admin email. |
 | D1 database name | Yes | Default is `emailfox-db`; Cloudflare can provision it. |
 | R2 bucket name | Yes | Cloudflare can provision it during deploy. |
@@ -152,9 +153,10 @@ Use plain Worker vars only for non-secret values:
 
 - `DOMAINS`
 - `MANAGEMENT_HOST`
-- `CLOUDFLARE_ACCOUNT_ID`
 - `PASSWORD_RESET_FROM`
 - `WORKER_SCRIPT_NAME`
+
+Advanced/manual installs may also add `CLOUDFLARE_ACCOUNT_ID` as a non-secret Worker var when one API token can access multiple Cloudflare accounts. It is intentionally not part of the one-click deploy form.
 
 `database_id` is not a Worker secret, but it is account-specific. The public template uses the placeholder `00000000-0000-0000-0000-000000000000` so the Deploy to Cloudflare resource step can replace it with the deployer's own generated D1 database id. Installed copies must keep that generated `database_id` for updates. For a private/manual deployment, add the deployer's own `database_id` locally or through the deploy platform configuration, never as a committed personal value.
 
@@ -250,11 +252,12 @@ Optionally edit non-secret vars in `wrangler.jsonc`:
 ```jsonc
 "vars": {
   "MANAGEMENT_HOST": "mail.example.com",
-  "CLOUDFLARE_ACCOUNT_ID": "your-account-id",
   "PASSWORD_RESET_FROM": "no-reply@example.com",
   "WORKER_SCRIPT_NAME": "emailfox"
 }
 ```
+
+If your API token can access multiple Cloudflare accounts, also add `CLOUDFLARE_ACCOUNT_ID` as a non-secret Worker var in your private installed copy.
 
 Build, apply remote migrations, and deploy:
 
