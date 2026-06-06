@@ -66,10 +66,9 @@ if (dryRun) {
 const requiredResourceBindings = ["DB", "MAIL_BUCKET"];
 const missingResourceBindings = requiredResourceBindings.filter((binding) => !preservedResourceBindings.has(binding));
 if (missingResourceBindings.length > 0) {
-  const existingWorker = remoteWorkerHasDeployments(workerName);
   const allowUnboundDeploy = envFlag("OMNIDOCK_ALLOW_UNBOUND_DEPLOY");
 
-  if ((existingWorker === true || existingWorker === null) && !allowUnboundDeploy) {
+  if (!allowUnboundDeploy) {
     console.error("OmniDock stopped this deploy before Wrangler could remove dashboard resource bindings.");
     console.error(`Missing generated binding(s): ${missingResourceBindings.join(", ")}`);
     console.error("Add OMNIDOCK_D1_DATABASE_ID and OMNIDOCK_R2_BUCKET_NAME as Cloudflare build/deploy variables or secrets, then deploy again.");
@@ -79,7 +78,7 @@ if (missingResourceBindings.length > 0) {
   }
 
   console.warn(`OmniDock deploy is missing generated resource binding(s): ${missingResourceBindings.join(", ")}.`);
-  console.warn("This is allowed only because the remote Worker has no detected deployments or OMNIDOCK_ALLOW_UNBOUND_DEPLOY=1 is set.");
+  console.warn("This is allowed only because OMNIDOCK_ALLOW_UNBOUND_DEPLOY=1 is set.");
 } else {
   console.log(`OmniDock preserved ${preservedResourceBindings.size} DB/R2 binding(s) for this deploy.`);
 }
@@ -141,43 +140,6 @@ async function fetchWorkerBindings(tokenValue, accountId, scriptName) {
     `/accounts/${accountId}/workers/scripts/${encodedScript}/settings`
   );
   return Array.isArray(response.result?.bindings) ? response.result.bindings : [];
-}
-
-function remoteWorkerHasDeployments(scriptName) {
-  if (!scriptName) return null;
-
-  const result = spawnSync("npx", ["wrangler", "deployments", "list", "--name", scriptName, "--json"], {
-    encoding: "utf8"
-  });
-
-  if (result.status !== 0) {
-    const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
-    if (/not found|does not exist|could not find|not exist/i.test(output)) {
-      return false;
-    }
-    if (output) {
-      console.warn(`OmniDock could not inspect existing Worker deployments: ${firstLine(output)}`);
-    }
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(result.stdout || "[]");
-    if (Array.isArray(parsed)) {
-      return parsed.length > 0;
-    }
-    if (Array.isArray(parsed.result)) {
-      return parsed.result.length > 0;
-    }
-    if (Array.isArray(parsed.deployments)) {
-      return parsed.deployments.length > 0;
-    }
-  } catch (error) {
-    console.warn(`OmniDock could not parse existing Worker deployments: ${readError(error)}`);
-    return null;
-  }
-
-  return null;
 }
 
 async function cloudflare(tokenValue, path) {
@@ -255,10 +217,6 @@ function stripJsonComments(source) {
 
 function readError(error) {
   return error instanceof Error ? error.message : String(error);
-}
-
-function firstLine(value) {
-  return value.split(/\r?\n/).find((line) => line.trim())?.trim() ?? value;
 }
 
 function envValue(name) {

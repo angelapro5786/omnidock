@@ -33,14 +33,18 @@ export function runtimeRequirements(env: RuntimeEnv, setupRequired: boolean): Ru
       name: "DB",
       required: true,
       configured: Boolean(env.DB),
-      message: env.DB ? "D1 database binding DB is connected." : "Add a D1 database binding named DB."
+      message: env.DB
+        ? "D1 database binding DB is connected."
+        : "Add a D1 database binding named DB. For Git deploys, set OMNIDOCK_D1_DATABASE_ID as a build variable, then redeploy."
     },
     {
       kind: "binding",
       name: "MAIL_BUCKET",
       required: true,
       configured: Boolean(env.MAIL_BUCKET),
-      message: env.MAIL_BUCKET ? "R2 bucket binding MAIL_BUCKET is connected." : "Add an R2 bucket binding named MAIL_BUCKET."
+      message: env.MAIL_BUCKET
+        ? "R2 bucket binding MAIL_BUCKET is connected."
+        : "Add an R2 bucket binding named MAIL_BUCKET. For Git deploys, set OMNIDOCK_R2_BUCKET_NAME as a build variable, then redeploy."
     },
     {
       kind: "variable",
