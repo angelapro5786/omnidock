@@ -125,6 +125,7 @@ export async function handleApi(
 
     if (url.pathname === "/api/auth/reset/request") {
       if (request.method !== "POST") return methodNotAllowed();
+      requireD1Binding(env);
       const body = await readJson(request);
       await requestAdminPasswordReset(env, requiredString(body, "email", { max: 320 }), publicOrigin(request, env));
       return json({ ok: true });
@@ -132,6 +133,7 @@ export async function handleApi(
 
     if (url.pathname === "/api/auth/reset/confirm") {
       if (request.method !== "POST") return methodNotAllowed();
+      requireD1Binding(env);
       const body = await readJson(request);
       await confirmAdminPasswordReset(env, {
         token: requiredString(body, "token", { min: 24, max: 256 }),
@@ -141,6 +143,7 @@ export async function handleApi(
       return json({ ok: true });
     }
 
+    requireD1Binding(env);
     await requireAdmin(request, env);
 
     if (url.pathname === "/api/bootstrap") {
@@ -340,6 +343,7 @@ export async function handleApi(
     const attachmentMatch = url.pathname.match(/^\/api\/attachments\/([^/]+)$/);
     if (attachmentMatch) {
       if (request.method !== "GET") return methodNotAllowed();
+      requireMailBucketBinding(env);
       const attachment = await getAttachmentById(env, attachmentMatch[1]);
       if (!attachment) {
         throw new ApiError(404, "attachment_not_found", "Attachment not found");
@@ -362,6 +366,7 @@ export async function handleApi(
     const replyMatch = url.pathname.match(/^\/api\/threads\/([^/]+)\/reply$/);
     if (replyMatch) {
       if (request.method !== "POST") return methodNotAllowed();
+      requireMailSendBindings(env);
       const body = await readJson(request);
       const sent = await sendEmail(env, {
         from: requiredString(body, "from", { max: 320 }),
@@ -380,6 +385,7 @@ export async function handleApi(
 
     if (url.pathname === "/api/send") {
       if (request.method !== "POST") return methodNotAllowed();
+      requireMailSendBindings(env);
       const body = await readJson(request);
       const sent = await sendEmail(env, {
         from: requiredString(body, "from", { max: 320 }),
@@ -414,6 +420,29 @@ export async function handleApi(
   } catch (error) {
     return errorResponse(error);
   }
+}
+
+function requireD1Binding(env: RuntimeEnv): void {
+  if (!env.DB) {
+    throw new ApiError(503, "database_binding_missing", "D1 binding DB is not configured for this Worker.");
+  }
+}
+
+function requireMailBucketBinding(env: RuntimeEnv): void {
+  if (!env.MAIL_BUCKET) {
+    throw new ApiError(503, "mail_bucket_binding_missing", "R2 binding MAIL_BUCKET is not configured for this Worker.");
+  }
+}
+
+function requireEmailBinding(env: RuntimeEnv): void {
+  if (!env.EMAIL) {
+    throw new ApiError(503, "email_binding_missing", "Email Sending binding EMAIL is not configured for this Worker.");
+  }
+}
+
+function requireMailSendBindings(env: RuntimeEnv): void {
+  requireMailBucketBinding(env);
+  requireEmailBinding(env);
 }
 
 async function seedDevelopmentData(env: RuntimeEnv): Promise<number> {
