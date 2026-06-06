@@ -832,7 +832,8 @@ button:hover:not(:disabled) {
 }
 
 .settings-grid,
-.signature-grid {
+.signature-grid,
+.external-grid {
   display: grid;
   gap: 12px;
   height: 100%;
@@ -845,6 +846,10 @@ button:hover:not(:disabled) {
 
 .signature-grid {
   grid-template-columns: minmax(300px, 380px) minmax(420px, 1fr);
+}
+
+.external-grid {
+  grid-template-columns: minmax(320px, 420px) minmax(520px, 1fr);
 }
 
 .other-settings-grid {
@@ -1104,6 +1109,7 @@ button:hover:not(:disabled) {
 }
 
 .stack-form input,
+.stack-form select,
 .stack-form textarea {
   width: 100%;
   border: 1px solid var(--line);
@@ -1118,12 +1124,17 @@ button:hover:not(:disabled) {
   height: 34px;
 }
 
+.stack-form select {
+  height: 34px;
+}
+
 .stack-form textarea {
   min-height: 92px;
   resize: vertical;
 }
 
 .stack-form input:focus,
+.stack-form select:focus,
 .stack-form textarea:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--focus-ring);
@@ -1154,13 +1165,15 @@ button:hover:not(:disabled) {
 }
 
 .contact-list,
-.signature-mailbox-list {
+.signature-mailbox-list,
+.external-account-list {
   min-height: 0;
   overflow: auto;
 }
 
 .contact-row,
-.signature-mailbox {
+.signature-mailbox,
+.external-account-row {
   display: grid;
   align-items: center;
   gap: 9px;
@@ -1182,37 +1195,65 @@ button:hover:not(:disabled) {
   grid-template-columns: 18px minmax(0, 1fr) auto;
 }
 
-.signature-mailbox.active {
+.external-account-row {
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+}
+
+.signature-mailbox.active,
+.external-account-row.active {
   background: var(--selected);
   color: var(--accent-strong);
 }
 
 .contact-row div,
-.signature-mailbox span {
+.signature-mailbox span,
+.external-account-row div {
   min-width: 0;
 }
 
 .contact-row strong,
 .contact-row span,
-.signature-mailbox span {
+.signature-mailbox span,
+.external-account-row strong,
+.external-account-row span {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.contact-row strong {
+.contact-row strong,
+.external-account-row strong {
   font-size: 13px;
 }
 
 .contact-row span,
-.contact-row b {
+.contact-row b,
+.external-account-row span {
   color: var(--muted);
   font: 11px/1.2 var(--mono);
 }
 
 .signature-editor {
   align-content: stretch;
+}
+
+.external-editor {
+  align-content: stretch;
+  overflow: auto;
+}
+
+.external-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.external-toggle-row,
+.external-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .rule-row-list {
@@ -2095,9 +2136,14 @@ button:hover:not(:disabled) {
 
   .settings-grid,
   .signature-grid,
+  .external-grid,
   .other-settings-grid {
     grid-template-columns: 1fr;
     height: auto;
+  }
+
+  .external-form-grid {
+    grid-template-columns: 1fr;
   }
 
   .settings-shell {

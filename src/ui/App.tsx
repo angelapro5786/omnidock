@@ -40,6 +40,7 @@ import {
   ApiClient,
   AttachmentDraft,
   ContactInput,
+  ExternalAccountInput,
   confirmPasswordReset,
   createAdmin,
   requestPasswordReset,
@@ -50,6 +51,7 @@ import {
   BootstrapPayload,
   ContactRow,
   DomainRow,
+  ExternalAccountRow,
   FolderKey,
   MailboxRow,
   MailboxSignatureRow,
@@ -71,7 +73,7 @@ const folders: { key: FolderKey; label: string; icon: typeof Inbox }[] = [
   { key: "archive", label: "Archive", icon: Archive }
 ];
 
-type ViewKey = "mail" | "rules" | "contacts" | "signatures" | "other-settings";
+type ViewKey = "mail" | "rules" | "contacts" | "signatures" | "external" | "other-settings";
 type PaletteKey = "mint" | "ubuntu" | "fedora" | "plasma" | "graphite";
 type SettingsViewKey = Exclude<ViewKey, "mail">;
 type AuthViewKey = "checking" | "configuration" | "login" | "setup" | "reset-request" | "reset-confirm";
@@ -90,6 +92,65 @@ const palettes: {
 
 const MAX_CLIENT_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const MAX_CLIENT_TOTAL_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+
+const externalProviderPresets: Record<
+  string,
+  {
+    label: string;
+    imapHost: string;
+    imapPort: number;
+    imapSecurity: string;
+    smtpHost: string;
+    smtpPort: number;
+    smtpSecurity: string;
+  }
+> = {
+  gmail: {
+    label: "Gmail",
+    imapHost: "imap.gmail.com",
+    imapPort: 993,
+    imapSecurity: "ssl",
+    smtpHost: "smtp.gmail.com",
+    smtpPort: 587,
+    smtpSecurity: "starttls"
+  },
+  outlook: {
+    label: "Outlook",
+    imapHost: "outlook.office365.com",
+    imapPort: 993,
+    imapSecurity: "ssl",
+    smtpHost: "smtp.office365.com",
+    smtpPort: 587,
+    smtpSecurity: "starttls"
+  },
+  yahoo: {
+    label: "Yahoo",
+    imapHost: "imap.mail.yahoo.com",
+    imapPort: 993,
+    imapSecurity: "ssl",
+    smtpHost: "smtp.mail.yahoo.com",
+    smtpPort: 587,
+    smtpSecurity: "starttls"
+  },
+  icloud: {
+    label: "iCloud",
+    imapHost: "imap.mail.me.com",
+    imapPort: 993,
+    imapSecurity: "ssl",
+    smtpHost: "smtp.mail.me.com",
+    smtpPort: 587,
+    smtpSecurity: "starttls"
+  },
+  custom: {
+    label: "Custom",
+    imapHost: "",
+    imapPort: 993,
+    imapSecurity: "ssl",
+    smtpHost: "",
+    smtpPort: 587,
+    smtpSecurity: "starttls"
+  }
+};
 
 function initialPalette(): PaletteKey {
   const stored = localStorage.getItem(PALETTE_KEY);
@@ -477,6 +538,7 @@ export function App() {
   const mailboxes = bootstrap.mailboxes;
   const contacts = bootstrap.contacts;
   const signatures = bootstrap.signatures;
+  const externalAccounts = bootstrap.externalAccounts ?? [];
   const activeDomain = domains.find((domain) => domain.id === selectedDomainId) ?? null;
   const activeMailbox = mailboxes.find((mailbox) => mailbox.id === selectedMailboxId) ?? null;
   const changeMailboxScope = (mailboxId: string | null) => {
@@ -637,6 +699,13 @@ export function App() {
             api={api}
             mailboxes={mailboxes}
             signatures={signatures}
+            onChange={loadBootstrap}
+            onNotice={setNotice}
+          />
+        ) : view === "external" ? (
+          <ExternalAccountsView
+            api={api}
+            accounts={externalAccounts}
             onChange={loadBootstrap}
             onNotice={setNotice}
           />
@@ -1350,6 +1419,11 @@ function SettingsTitle({
       subtitle: "Mailbox based signatures",
       icon: PenLine
     },
+    external: {
+      title: "External",
+      subtitle: "External email accounts",
+      icon: Mail
+    },
     "other-settings": {
       title: "Other Settings",
       subtitle: "Refresh and interface",
@@ -1463,6 +1537,11 @@ function Sidebar({
           <PenLine size={16} />
           <span>Signatures</span>
           <b>{stats.mailboxes ?? 0}</b>
+        </button>
+        <button className={view === "external" ? "settings-link active" : "settings-link"} onClick={() => onSettingsOpen("external")}>
+          <Mail size={16} />
+          <span>External</span>
+          <b>{stats.external_accounts ?? 0}</b>
         </button>
         <button
           className={view === "other-settings" ? "settings-link active" : "settings-link"}
@@ -2048,6 +2127,326 @@ function SignaturesView({
       </div>
     </section>
   );
+}
+
+function ExternalAccountsView({
+  api,
+  accounts,
+  onChange,
+  onNotice
+}: {
+  api: ApiClient | null;
+  accounts: ExternalAccountRow[];
+  onChange: () => Promise<void>;
+  onNotice: (message: string | null) => void;
+}) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<ExternalAccountInput>(() => createExternalDraft("gmail"));
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (selectedId && !accounts.some((account) => account.id === selectedId)) {
+      setSelectedId(null);
+      setDraft(createExternalDraft("gmail"));
+    }
+  }, [accounts, selectedId]);
+
+  const selectedAccount = accounts.find((account) => account.id === selectedId) ?? null;
+
+  function startNewAccount(provider = "gmail") {
+    setSelectedId(null);
+    setDraft(createExternalDraft(provider));
+  }
+
+  function editAccount(account: ExternalAccountRow) {
+    setSelectedId(account.id);
+    setDraft(externalDraftFromRow(account));
+  }
+
+  function updateDraft(patch: Partial<ExternalAccountInput>) {
+    setDraft((current) => ({ ...current, ...patch }));
+  }
+
+  function changeProvider(provider: string) {
+    const preset = externalProviderPresets[provider] ?? externalProviderPresets.custom;
+    setDraft((current) => ({
+      ...current,
+      provider,
+      imapHost: preset.imapHost,
+      imapPort: preset.imapPort,
+      imapSecurity: preset.imapSecurity,
+      smtpHost: preset.smtpHost,
+      smtpPort: preset.smtpPort,
+      smtpSecurity: preset.smtpSecurity
+    }));
+  }
+
+  async function saveAccount(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!api || !draft.email.trim()) return;
+
+    setBusy(true);
+    try {
+      const result = await api.saveExternalAccount(draft, selectedId);
+      setSelectedId(result.account.id);
+      await onChange();
+      onNotice("External account saved");
+    } catch (error) {
+      onNotice(readError(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeAccount() {
+    if (!api || !selectedAccount) return;
+    const confirmed = window.confirm(`Delete external account ${selectedAccount.email}?`);
+    if (!confirmed) return;
+
+    setBusy(true);
+    try {
+      await api.deleteExternalAccount(selectedAccount.id);
+      startNewAccount();
+      await onChange();
+      onNotice("External account deleted");
+    } catch (error) {
+      onNotice(readError(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="settings-shell">
+      <div className="external-grid">
+        <section className="settings-table-card">
+          <header>
+            <div>
+              <span>External accounts</span>
+              <strong>{accounts.length} saved</strong>
+            </div>
+            <button className="button mini" type="button" onClick={() => startNewAccount()} disabled={busy}>
+              <Plus size={13} />
+              New
+            </button>
+          </header>
+          <div className="external-account-list">
+            {accounts.length === 0 ? (
+              <div className="empty-state">No external accounts</div>
+            ) : (
+              accounts.map((account) => (
+                <button
+                  className={selectedId === account.id ? "external-account-row active" : "external-account-row"}
+                  key={account.id}
+                  type="button"
+                  onClick={() => editAccount(account)}
+                >
+                  <Mail size={15} />
+                  <div>
+                    <strong>{account.email}</strong>
+                    <span>{externalProviderLabel(account.provider)}</span>
+                  </div>
+                  <StatusPill ok={account.status === "configured"} label={account.status === "configured" ? "Secret set" : "Needs secret"} />
+                </button>
+              ))
+            )}
+          </div>
+        </section>
+
+        <section className="settings-card external-editor">
+          <header>
+            <div>
+              <span>Account</span>
+              <strong>{selectedAccount?.email ?? "New external account"}</strong>
+            </div>
+            <Mail size={18} />
+          </header>
+          <form className="stack-form" onSubmit={saveAccount}>
+            <div className="external-form-grid">
+              <label>
+                Provider
+                <select value={draft.provider} onChange={(event) => changeProvider(event.target.value)}>
+                  {Object.entries(externalProviderPresets).map(([key, preset]) => (
+                    <option key={key} value={key}>
+                      {preset.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Email
+                <input
+                  value={draft.email}
+                  onChange={(event) => updateDraft({ email: event.target.value })}
+                  placeholder="name@gmail.com"
+                  autoComplete="email"
+                />
+              </label>
+              <label>
+                Display name
+                <input value={draft.displayName ?? ""} onChange={(event) => updateDraft({ displayName: event.target.value })} />
+              </label>
+              <label>
+                Username
+                <input
+                  value={draft.username ?? ""}
+                  onChange={(event) => updateDraft({ username: event.target.value })}
+                  placeholder={draft.email || "name@gmail.com"}
+                />
+              </label>
+              <label>
+                Auth
+                <select value={draft.authType} onChange={(event) => updateDraft({ authType: event.target.value })}>
+                  <option value="app_password">App password</option>
+                  <option value="oauth2">OAuth2</option>
+                  <option value="none">None</option>
+                </select>
+              </label>
+              <label>
+                Credential secret
+                <input
+                  value={draft.credentialSecretName ?? ""}
+                  onChange={(event) => updateDraft({ credentialSecretName: event.target.value.toUpperCase() })}
+                  placeholder="GMAIL_ACCOUNT_PASSWORD"
+                />
+              </label>
+            </div>
+
+            <div className="external-toggle-row">
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={draft.inboundEnabled}
+                  onChange={(event) => updateDraft({ inboundEnabled: event.target.checked })}
+                />
+                Inbound
+              </label>
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={draft.outboundEnabled}
+                  onChange={(event) => updateDraft({ outboundEnabled: event.target.checked })}
+                />
+                Outbound
+              </label>
+            </div>
+
+            <div className="external-form-grid">
+              <label>
+                IMAP host
+                <input value={draft.imapHost ?? ""} onChange={(event) => updateDraft({ imapHost: event.target.value })} />
+              </label>
+              <label>
+                IMAP port
+                <input
+                  type="number"
+                  min={1}
+                  max={65535}
+                  value={draft.imapPort ?? ""}
+                  onChange={(event) => updateDraft({ imapPort: event.target.value ? Number(event.target.value) : null })}
+                />
+              </label>
+              <label>
+                IMAP security
+                <select value={draft.imapSecurity} onChange={(event) => updateDraft({ imapSecurity: event.target.value })}>
+                  <option value="ssl">SSL</option>
+                  <option value="starttls">STARTTLS</option>
+                  <option value="none">None</option>
+                </select>
+              </label>
+              <label>
+                SMTP host
+                <input value={draft.smtpHost ?? ""} onChange={(event) => updateDraft({ smtpHost: event.target.value })} />
+              </label>
+              <label>
+                SMTP port
+                <input
+                  type="number"
+                  min={1}
+                  max={65535}
+                  value={draft.smtpPort ?? ""}
+                  onChange={(event) => updateDraft({ smtpPort: event.target.value ? Number(event.target.value) : null })}
+                />
+              </label>
+              <label>
+                SMTP security
+                <select value={draft.smtpSecurity} onChange={(event) => updateDraft({ smtpSecurity: event.target.value })}>
+                  <option value="ssl">SSL</option>
+                  <option value="starttls">STARTTLS</option>
+                  <option value="none">None</option>
+                </select>
+              </label>
+            </div>
+
+            <label>
+              Notes
+              <textarea value={draft.notes ?? ""} onChange={(event) => updateDraft({ notes: event.target.value })} />
+            </label>
+
+            <div className="external-actions">
+              <button className="button primary" type="submit" disabled={busy || !draft.email.trim()}>
+                <Save size={16} />
+                Save account
+              </button>
+              <button className="button ghost" type="button" onClick={() => startNewAccount(draft.provider)} disabled={busy}>
+                <Plus size={16} />
+                New
+              </button>
+              <button className="button danger" type="button" onClick={() => void removeAccount()} disabled={busy || !selectedAccount}>
+                <Trash2 size={16} />
+                Delete
+              </button>
+            </div>
+          </form>
+        </section>
+      </div>
+    </section>
+  );
+}
+
+function createExternalDraft(provider: string): ExternalAccountInput {
+  const preset = externalProviderPresets[provider] ?? externalProviderPresets.custom;
+  return {
+    provider,
+    email: "",
+    displayName: "",
+    username: "",
+    authType: "app_password",
+    credentialSecretName: "",
+    imapHost: preset.imapHost,
+    imapPort: preset.imapPort,
+    imapSecurity: preset.imapSecurity,
+    smtpHost: preset.smtpHost,
+    smtpPort: preset.smtpPort,
+    smtpSecurity: preset.smtpSecurity,
+    inboundEnabled: true,
+    outboundEnabled: true,
+    notes: ""
+  };
+}
+
+function externalDraftFromRow(account: ExternalAccountRow): ExternalAccountInput {
+  return {
+    provider: account.provider,
+    email: account.email,
+    displayName: account.display_name ?? "",
+    username: account.username ?? "",
+    authType: account.auth_type,
+    credentialSecretName: account.credential_secret_name ?? "",
+    imapHost: account.imap_host ?? "",
+    imapPort: account.imap_port,
+    imapSecurity: account.imap_security,
+    smtpHost: account.smtp_host ?? "",
+    smtpPort: account.smtp_port,
+    smtpSecurity: account.smtp_security,
+    inboundEnabled: account.inbound_enabled === 1,
+    outboundEnabled: account.outbound_enabled === 1,
+    notes: account.notes ?? ""
+  };
+}
+
+function externalProviderLabel(provider: string): string {
+  return externalProviderPresets[provider]?.label ?? provider;
 }
 
 function OtherSettingsView({

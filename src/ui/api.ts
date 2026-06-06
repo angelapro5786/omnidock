@@ -1,4 +1,4 @@
-import { BootstrapPayload, ContactRow, DomainRow, SetupStatusPayload, ThreadPayload, ThreadRow } from "./types";
+import { BootstrapPayload, ContactRow, DomainRow, ExternalAccountRow, SetupStatusPayload, ThreadPayload, ThreadRow } from "./types";
 
 export type AttachmentDraft = {
   filename: string;
@@ -12,6 +12,24 @@ export type ContactInput = {
   name?: string | null;
   company?: string | null;
   tags?: string | null;
+  notes?: string | null;
+};
+
+export type ExternalAccountInput = {
+  provider: string;
+  email: string;
+  displayName?: string | null;
+  username?: string | null;
+  authType: string;
+  credentialSecretName?: string | null;
+  imapHost?: string | null;
+  imapPort?: number | null;
+  imapSecurity: string;
+  smtpHost?: string | null;
+  smtpPort?: number | null;
+  smtpSecurity: string;
+  inboundEnabled: boolean;
+  outboundEnabled: boolean;
   notes?: string | null;
 };
 
@@ -117,6 +135,17 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify({ contacts, source })
     });
+  }
+
+  saveExternalAccount(input: ExternalAccountInput, id?: string | null): Promise<{ ok: true; account: ExternalAccountRow }> {
+    return this.request(id ? `/api/external-accounts/${id}` : "/api/external-accounts", {
+      method: id ? "PUT" : "POST",
+      body: JSON.stringify(input)
+    });
+  }
+
+  deleteExternalAccount(id: string): Promise<unknown> {
+    return this.request(`/api/external-accounts/${id}`, { method: "DELETE" });
   }
 
   patchThread(threadId: string, action: "read" | "archive" | "unarchive"): Promise<unknown> {

@@ -95,6 +95,29 @@ export type MailboxSignatureRow = {
   updated_at: string;
 };
 
+export type ExternalAccountRow = {
+  id: string;
+  provider: string;
+  email: string;
+  display_name: string | null;
+  username: string | null;
+  auth_type: string;
+  credential_secret_name: string | null;
+  imap_host: string | null;
+  imap_port: number | null;
+  imap_security: string;
+  smtp_host: string | null;
+  smtp_port: number | null;
+  smtp_security: string;
+  inbound_enabled: number;
+  outbound_enabled: number;
+  status: string;
+  last_checked_at: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type BootstrapPayload = {
   ok: true;
   managementHost: string;
@@ -102,6 +125,7 @@ export type BootstrapPayload = {
   mailboxes: MailboxRow[];
   contacts: ContactRow[];
   signatures: MailboxSignatureRow[];
+  externalAccounts: ExternalAccountRow[];
   stats: Record<string, number>;
   threads: ThreadRow[];
 };

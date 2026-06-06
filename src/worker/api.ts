@@ -15,6 +15,7 @@ import {
 } from "./cloudflare";
 import {
   archiveThread,
+  deleteExternalAccount,
   deleteThread,
   getAttachmentById,
   getMailboxStats,
@@ -25,6 +26,7 @@ import {
   insertMessage,
   listContacts,
   listDomains,
+  listExternalAccounts,
   listThreadStorageKeys,
   listMailboxSignatures,
   listMailboxes,
@@ -34,6 +36,7 @@ import {
   recordAudit,
   setDefaultDomain,
   upsertContact,
+  upsertExternalAccount,
   upsertMailboxSignature,
   upsertDomain
 } from "./db";
@@ -148,11 +151,12 @@ export async function handleApi(
 
     if (url.pathname === "/api/bootstrap") {
       if (request.method !== "GET") return methodNotAllowed();
-      const [domains, mailboxes, contacts, signatures, stats, threads] = await Promise.all([
+      const [domains, mailboxes, contacts, signatures, externalAccounts, stats, threads] = await Promise.all([
         listDomains(env),
         listMailboxes(env),
         listContacts(env),
         listMailboxSignatures(env),
+        listExternalAccounts(env),
         getStats(env),
         listThreads(env, { folder: "inbox" })
       ]);
@@ -163,6 +167,7 @@ export async function handleApi(
         mailboxes,
         contacts,
         signatures,
+        externalAccounts,
         stats,
         threads
       });
@@ -235,6 +240,42 @@ export async function handleApi(
       const imported = await importContacts(env, contacts, source);
       ctx.waitUntil(recordAudit(env, "contacts.imported", null, { imported, source }));
       return json({ ok: true, imported }, { status: 201 });
+    }
+
+    if (url.pathname === "/api/external-accounts") {
+      if (request.method === "GET") {
+        return json({ ok: true, externalAccounts: await listExternalAccounts(env) });
+      }
+
+      if (request.method === "POST") {
+        const body = await readJson(request);
+        const account = await upsertExternalAccount(env, readExternalAccountInput(body));
+        ctx.waitUntil(recordAudit(env, "external_account.saved", account.id, { email: account.email, provider: account.provider }));
+        return json({ ok: true, account }, { status: 201 });
+      }
+
+      return methodNotAllowed();
+    }
+
+    const externalAccountMatch = url.pathname.match(/^\/api\/external-accounts\/([^/]+)$/);
+    if (externalAccountMatch) {
+      if (request.method === "PUT") {
+        const body = await readJson(request);
+        const account = await upsertExternalAccount(env, {
+          ...readExternalAccountInput(body),
+          id: externalAccountMatch[1]
+        });
+        ctx.waitUntil(recordAudit(env, "external_account.saved", account.id, { email: account.email, provider: account.provider }));
+        return json({ ok: true, account });
+      }
+
+      if (request.method === "DELETE") {
+        await deleteExternalAccount(env, externalAccountMatch[1]);
+        ctx.waitUntil(recordAudit(env, "external_account.deleted", externalAccountMatch[1], {}));
+        return json({ ok: true });
+      }
+
+      return methodNotAllowed();
     }
 
     if (url.pathname === "/api/mailboxes") {
@@ -492,6 +533,52 @@ function readContactInput(
   };
 }
 
+function readExternalAccountInput(body: Record<string, unknown>): {
+  provider: string;
+  email: string;
+  displayName: string | null;
+  username: string | null;
+  authType: string;
+  credentialSecretName: string | null;
+  imapHost: string | null;
+  imapPort: number | null;
+  imapSecurity: string;
+  smtpHost: string | null;
+  smtpPort: number | null;
+  smtpSecurity: string;
+  inboundEnabled: boolean;
+  outboundEnabled: boolean;
+  notes: string | null;
+} {
+  const provider = enumString(body, "provider", ["gmail", "outlook", "yahoo", "icloud", "custom"], "custom");
+  const authType = enumString(body, "authType", ["app_password", "oauth2", "none"], "app_password");
+  const imapSecurity = enumString(body, "imapSecurity", ["ssl", "starttls", "none"], "ssl");
+  const smtpSecurity = enumString(body, "smtpSecurity", ["ssl", "starttls", "none"], "starttls");
+  const credentialSecretName = optionalString(body, "credentialSecretName", { max: 128 });
+
+  if (credentialSecretName && !/^[A-Z_][A-Z0-9_]*$/i.test(credentialSecretName)) {
+    throw new ApiError(400, "invalid_secret_name", "Credential secret name must look like a Worker secret name");
+  }
+
+  return {
+    provider,
+    email: requiredString(body, "email", { max: 320 }),
+    displayName: optionalString(body, "displayName", { max: 160 }),
+    username: optionalString(body, "username", { max: 320 }),
+    authType,
+    credentialSecretName,
+    imapHost: optionalString(body, "imapHost", { max: 253 }),
+    imapPort: optionalPort(body, "imapPort"),
+    imapSecurity,
+    smtpHost: optionalString(body, "smtpHost", { max: 253 }),
+    smtpPort: optionalPort(body, "smtpPort"),
+    smtpSecurity,
+    inboundEnabled: optionalBoolean(body, "inboundEnabled"),
+    outboundEnabled: optionalBoolean(body, "outboundEnabled"),
+    notes: optionalString(body, "notes", { max: 2000 })
+  };
+}
+
 function publicOrigin(request: Request, env: RuntimeEnv): string {
   const url = new URL(request.url);
   const managementHost = env.MANAGEMENT_HOST?.trim();
@@ -504,6 +591,34 @@ function publicOrigin(request: Request, env: RuntimeEnv): string {
     return `https://${managementHost}`;
   }
   return url.origin;
+}
+
+function enumString<T extends string>(
+  body: Record<string, unknown>,
+  field: string,
+  allowed: readonly T[],
+  fallback: T
+): T {
+  const value = body[field];
+  if (value === undefined || value === null || value === "") {
+    return fallback;
+  }
+  if (typeof value !== "string" || !allowed.includes(value as T)) {
+    throw new ApiError(400, "invalid_field", `${field} is invalid`);
+  }
+  return value as T;
+}
+
+function optionalPort(body: Record<string, unknown>, field: string): number | null {
+  const value = body[field];
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  const port = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new ApiError(400, "invalid_port", `${field} is invalid`);
+  }
+  return port;
 }
 
 function readContactList(

@@ -91,6 +91,29 @@ export type MailboxSignatureRow = {
   updated_at: string;
 };
 
+export type ExternalAccountRow = {
+  id: string;
+  provider: string;
+  email: string;
+  display_name: string | null;
+  username: string | null;
+  auth_type: string;
+  credential_secret_name: string | null;
+  imap_host: string | null;
+  imap_port: number | null;
+  imap_security: string;
+  smtp_host: string | null;
+  smtp_port: number | null;
+  smtp_security: string;
+  inbound_enabled: number;
+  outbound_enabled: number;
+  status: string;
+  last_checked_at: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type ThreadRow = MessageRow & {
   message_count: number;
   unread_count: number;
@@ -178,6 +201,136 @@ export async function listContacts(env: RuntimeEnv): Promise<ContactRow[]> {
     "SELECT * FROM contacts ORDER BY COALESCE(name, email) COLLATE NOCASE ASC LIMIT 1000"
   ).all<ContactRow>();
   return result.results ?? [];
+}
+
+export async function listExternalAccounts(env: RuntimeEnv): Promise<ExternalAccountRow[]> {
+  const result = await env.DB.prepare(
+    "SELECT * FROM external_accounts ORDER BY email COLLATE NOCASE ASC LIMIT 200"
+  ).all<ExternalAccountRow>();
+  return result.results ?? [];
+}
+
+export async function upsertExternalAccount(
+  env: RuntimeEnv,
+  input: {
+    id?: string | null;
+    provider: string;
+    email: string;
+    displayName?: string | null;
+    username?: string | null;
+    authType: string;
+    credentialSecretName?: string | null;
+    imapHost?: string | null;
+    imapPort?: number | null;
+    imapSecurity: string;
+    smtpHost?: string | null;
+    smtpPort?: number | null;
+    smtpSecurity: string;
+    inboundEnabled: boolean;
+    outboundEnabled: boolean;
+    notes?: string | null;
+  }
+): Promise<ExternalAccountRow> {
+  const email = normalizeEmail(input.email);
+  const existingById = input.id
+    ? await env.DB.prepare("SELECT * FROM external_accounts WHERE id = ?").bind(input.id).first<ExternalAccountRow>()
+    : null;
+  if (input.id && !existingById) {
+    throw new ApiError(404, "external_account_not_found", "External account not found");
+  }
+
+  const existingByEmail = await env.DB.prepare("SELECT * FROM external_accounts WHERE email = ?")
+    .bind(email)
+    .first<ExternalAccountRow>();
+  if (existingByEmail && existingById && existingByEmail.id !== existingById.id) {
+    throw new ApiError(409, "external_account_exists", "External account email already exists");
+  }
+
+  const existing = existingById ?? existingByEmail;
+  const status = input.authType === "none" || nullableText(input.credentialSecretName) ? "configured" : "needs_secret";
+
+  if (!existing) {
+    const id = createId("ext");
+    await env.DB.prepare(
+      `INSERT INTO external_accounts (
+        id, provider, email, display_name, username, auth_type, credential_secret_name,
+        imap_host, imap_port, imap_security, smtp_host, smtp_port, smtp_security,
+        inbound_enabled, outbound_enabled, status, notes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+      .bind(
+        id,
+        input.provider,
+        email,
+        nullableText(input.displayName),
+        nullableText(input.username) ?? email,
+        input.authType,
+        nullableText(input.credentialSecretName),
+        nullableText(input.imapHost),
+        input.imapPort ?? null,
+        input.imapSecurity,
+        nullableText(input.smtpHost),
+        input.smtpPort ?? null,
+        input.smtpSecurity,
+        input.inboundEnabled ? 1 : 0,
+        input.outboundEnabled ? 1 : 0,
+        status,
+        nullableText(input.notes)
+      )
+      .run();
+
+    const created = await env.DB.prepare("SELECT * FROM external_accounts WHERE id = ?")
+      .bind(id)
+      .first<ExternalAccountRow>();
+    if (!created) {
+      throw new ApiError(500, "external_account_insert_failed", "External account could not be saved");
+    }
+    return created;
+  }
+
+  await env.DB.prepare(
+    `UPDATE external_accounts
+     SET provider = ?, email = ?, display_name = ?, username = ?, auth_type = ?,
+         credential_secret_name = ?, imap_host = ?, imap_port = ?, imap_security = ?,
+         smtp_host = ?, smtp_port = ?, smtp_security = ?, inbound_enabled = ?,
+         outbound_enabled = ?, status = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`
+  )
+    .bind(
+      input.provider,
+      email,
+      nullableText(input.displayName),
+      nullableText(input.username) ?? email,
+      input.authType,
+      nullableText(input.credentialSecretName),
+      nullableText(input.imapHost),
+      input.imapPort ?? null,
+      input.imapSecurity,
+      nullableText(input.smtpHost),
+      input.smtpPort ?? null,
+      input.smtpSecurity,
+      input.inboundEnabled ? 1 : 0,
+      input.outboundEnabled ? 1 : 0,
+      status,
+      nullableText(input.notes),
+      existing.id
+    )
+    .run();
+
+  const updated = await env.DB.prepare("SELECT * FROM external_accounts WHERE id = ?")
+    .bind(existing.id)
+    .first<ExternalAccountRow>();
+  if (!updated) {
+    throw new ApiError(500, "external_account_update_failed", "External account could not be saved");
+  }
+  return updated;
+}
+
+export async function deleteExternalAccount(env: RuntimeEnv, id: string): Promise<void> {
+  const result = await env.DB.prepare("DELETE FROM external_accounts WHERE id = ?").bind(id).run();
+  if ((result.meta.changes ?? 0) === 0) {
+    throw new ApiError(404, "external_account_not_found", "External account not found");
+  }
 }
 
 export async function upsertContact(
@@ -815,13 +968,14 @@ export async function getStats(env: RuntimeEnv): Promise<Record<string, number>>
       (SELECT COUNT(*) FROM domains) AS domains,
       (SELECT COUNT(*) FROM mailboxes) AS mailboxes,
       (SELECT COUNT(*) FROM contacts) AS contacts,
+      (SELECT COUNT(*) FROM external_accounts) AS external_accounts,
       (SELECT COUNT(*) FROM messages WHERE direction = 'inbound' AND archived_at IS NULL) AS inbox,
       (SELECT COUNT(*) FROM messages WHERE direction = 'outbound' AND archived_at IS NULL) AS sent,
       (SELECT COUNT(*) FROM messages WHERE archived_at IS NOT NULL) AS archive,
       (SELECT COUNT(*) FROM messages WHERE direction = 'inbound' AND read_at IS NULL AND archived_at IS NULL) AS unread`
   ).first<Record<string, number>>();
 
-  return rows ?? { domains: 0, mailboxes: 0, contacts: 0, inbox: 0, sent: 0, archive: 0, unread: 0 };
+  return rows ?? { domains: 0, mailboxes: 0, contacts: 0, external_accounts: 0, inbox: 0, sent: 0, archive: 0, unread: 0 };
 }
 
 export async function getMailboxStats(env: RuntimeEnv, mailboxId: string | null): Promise<Record<string, number>> {
@@ -831,7 +985,7 @@ export async function getMailboxStats(env: RuntimeEnv, mailboxId: string | null)
 
   const mailbox = await getMailboxById(env, mailboxId);
   if (!mailbox) {
-    return { domains: 0, mailboxes: 0, contacts: 0, inbox: 0, sent: 0, archive: 0, unread: 0 };
+    return { domains: 0, mailboxes: 0, contacts: 0, external_accounts: 0, inbox: 0, sent: 0, archive: 0, unread: 0 };
   }
 
   const rows = await env.DB.prepare(
@@ -839,6 +993,7 @@ export async function getMailboxStats(env: RuntimeEnv, mailboxId: string | null)
       (SELECT COUNT(*) FROM domains) AS domains,
       (SELECT COUNT(*) FROM mailboxes) AS mailboxes,
       (SELECT COUNT(*) FROM contacts) AS contacts,
+      (SELECT COUNT(*) FROM external_accounts) AS external_accounts,
       (SELECT COUNT(*) FROM messages WHERE direction = 'inbound' AND archived_at IS NULL AND mailbox = ?) AS inbox,
       (SELECT COUNT(*) FROM messages WHERE direction = 'outbound' AND archived_at IS NULL AND from_address = ?) AS sent,
       (SELECT COUNT(*) FROM messages WHERE archived_at IS NOT NULL AND (mailbox = ? OR (direction = 'outbound' AND from_address = ?))) AS archive,
@@ -847,7 +1002,7 @@ export async function getMailboxStats(env: RuntimeEnv, mailboxId: string | null)
     .bind(mailbox.address, mailbox.address, mailbox.address, mailbox.address, mailbox.address)
     .first<Record<string, number>>();
 
-  return rows ?? { domains: 0, mailboxes: 0, contacts: 0, inbox: 0, sent: 0, archive: 0, unread: 0 };
+  return rows ?? { domains: 0, mailboxes: 0, contacts: 0, external_accounts: 0, inbox: 0, sent: 0, archive: 0, unread: 0 };
 }
 
 export async function recordAudit(
