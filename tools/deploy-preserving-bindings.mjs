@@ -4,6 +4,7 @@ import fs from "node:fs";
 const CONFIG_PATH = "wrangler.jsonc";
 const GENERATED_CONFIG_PATH = ".wrangler.omnidock.generated.jsonc";
 const CLOUDFLARE_API = "https://api.cloudflare.com/client/v4";
+const RESERVED_R2_BINDINGS = new Set(["ASSETS", "DB", "EMAIL", "MAIL_BUCKET"]);
 
 const baseConfig = readJsonc(CONFIG_PATH);
 const generatedConfig = structuredClone(baseConfig);
@@ -42,6 +43,7 @@ for (const bucket of extraR2Buckets) {
   upsertR2Bucket(generatedConfig, bucket);
   preservedResourceBindings.add(bucket.binding);
 }
+syncR2DisplayVars(generatedConfig);
 
 if (token && workerName) {
   try {
@@ -51,6 +53,7 @@ if (token && workerName) {
       for (const bindingName of mergeCloudflareBindings(generatedConfig, bindings)) {
         preservedResourceBindings.add(bindingName);
       }
+      syncR2DisplayVars(generatedConfig);
     }
   } catch (error) {
     console.warn(`OmniDock could not read existing Worker bindings: ${readError(error)}`);
@@ -125,6 +128,28 @@ function upsertR2Bucket(config, bucket) {
   config.r2_buckets = next;
 }
 
+function syncR2DisplayVars(config) {
+  const buckets = Array.isArray(config.r2_buckets) ? config.r2_buckets : [];
+  const mailBucket = buckets.find((item) => item?.binding === "MAIL_BUCKET" && item.bucket_name);
+  const extraBuckets = buckets
+    .filter((item) => item?.binding && item.bucket_name && !RESERVED_R2_BINDINGS.has(item.binding))
+    .map((item) => `${item.binding}:${item.bucket_name}`);
+
+  if (mailBucket) {
+    upsertVar(config, "R2_BUCKET_NAME", mailBucket.bucket_name);
+  }
+
+  if (extraBuckets.length > 0) {
+    upsertVar(config, "EXTRA_R2_BUCKETS", extraBuckets.join(","));
+  }
+}
+
+function upsertVar(config, name, value) {
+  if (!value) return;
+  config.vars = isPlainObject(config.vars) ? config.vars : {};
+  config.vars[name] = value;
+}
+
 async function configuredAccountId(tokenValue) {
   const configured = process.env.CLOUDFLARE_ACCOUNT_ID?.trim();
   if (configured) return configured;
@@ -170,6 +195,10 @@ async function cloudflare(tokenValue, path) {
 function readJsonc(path) {
   const source = fs.readFileSync(path, "utf8");
   return JSON.parse(stripJsonComments(source));
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function stripJsonComments(source) {
@@ -248,7 +277,7 @@ function parseExtraR2Buckets(value) {
     if (!separator) continue;
     const binding = item.slice(0, item.indexOf(separator)).trim();
     const bucketName = item.slice(item.indexOf(separator) + 1).trim();
-    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(binding) || !bucketName || seen.has(binding)) continue;
+    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(binding) || !bucketName || seen.has(binding) || RESERVED_R2_BINDINGS.has(binding)) continue;
     seen.add(binding);
     buckets.push({ binding, bucket_name: bucketName });
   }

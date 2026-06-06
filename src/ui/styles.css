@@ -299,14 +299,15 @@ button:hover:not(:disabled) {
   padding: 0 2px 2px;
 }
 
-.mailbox-switcher span {
+.mailbox-switcher > span {
   color: var(--muted);
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
 }
 
-.mailbox-switcher .custom-select-trigger {
+.mailbox-switcher .custom-select-trigger,
+.bucket-switcher .custom-select-trigger {
   width: 100%;
   height: 34px;
   border: 1px solid var(--line-strong);
@@ -381,6 +382,15 @@ button:hover:not(:disabled) {
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
+}
+
+.section-title span {
+  flex: 1;
+}
+
+.section-title b {
+  color: var(--muted);
+  font-size: 11px;
 }
 
 .section-toggle {
@@ -688,6 +698,19 @@ button:hover:not(:disabled) {
   border-color: var(--hover-line);
   background: var(--hover-bg);
   color: var(--hover-text);
+}
+
+.custom-select-option.disabled,
+.custom-select-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.custom-select-option.disabled:hover,
+.custom-select-option:disabled:hover {
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
 }
 
 .button,
@@ -1013,6 +1036,23 @@ button:hover:not(:disabled) {
   display: block;
   margin: 3px 0;
   font-size: 15px;
+}
+
+.bucket-select {
+  display: grid;
+  gap: 4px;
+  min-width: min(360px, 48vw);
+}
+
+.bucket-select .custom-select-trigger {
+  height: 34px;
+  border-color: var(--line-strong);
+  background: linear-gradient(var(--control-hover), var(--control));
+  font: 12px/1 var(--mono);
+}
+
+.bucket-select .custom-select-menu {
+  width: max(100%, 320px);
 }
 
 .bucket-actions {

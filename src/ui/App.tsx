@@ -93,6 +93,7 @@ type SelectOption = {
   value: string;
   label: string;
   description?: string;
+  disabled?: boolean;
 };
 type AppDialogTone = "default" | "danger";
 type AppConfirmOptions = {
@@ -1584,15 +1585,24 @@ function CustomSelect({
         <div className="custom-select-menu" role="listbox">
           {options.map((option) => (
             <button
-              className={option.value === value ? "custom-select-option active" : "custom-select-option"}
+              className={[
+                "custom-select-option",
+                option.value === value ? "active" : "",
+                option.disabled ? "disabled" : ""
+              ]
+                .filter(Boolean)
+                .join(" ")}
               key={option.value}
               type="button"
+              disabled={option.disabled}
               onClick={() => {
+                if (option.disabled) return;
                 onChange(option.value);
                 setOpen(false);
               }}
               role="option"
               aria-selected={option.value === value}
+              aria-disabled={option.disabled}
             >
               <span>{option.label}</span>
               {option.description ? <small>{option.description}</small> : null}
@@ -1717,6 +1727,17 @@ function BucketTitle({ bucket }: { bucket: BucketRow | null }) {
   );
 }
 
+function bucketOptionsForSelect(buckets: BucketRow[]): SelectOption[] {
+  return buckets.length === 0
+    ? [{ value: "", label: "No buckets" }]
+    : buckets.map((bucket) => ({
+        value: bucket.id,
+        label: bucket.name,
+        description: bucket.configured ? bucket.description : `${bucket.binding} binding missing`,
+        disabled: !bucket.configured
+      }));
+}
+
 function Sidebar({
   managementHost,
   mailboxes,
@@ -1748,11 +1769,7 @@ function Sidebar({
   onSettingsOpen: (view: SettingsViewKey) => void;
   onLock: () => void;
 }) {
-  const [bucketsOpen, setBucketsOpen] = useState(true);
-
-  useEffect(() => {
-    if (view === "buckets") setBucketsOpen(true);
-  }, [view]);
+  const bucketOptions = bucketOptionsForSelect(buckets);
 
   return (
     <aside className="sidebar">
@@ -1795,39 +1812,21 @@ function Sidebar({
         })}
       </nav>
 
-      <div className="sidebar-section">
-        <button
-          className="section-title section-toggle"
-          type="button"
-          onClick={() => setBucketsOpen((open) => !open)}
-          aria-expanded={bucketsOpen}
-        >
-          {bucketsOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+      <div className="sidebar-section bucket-switcher">
+        <div className="section-title">
           <Server size={14} />
           <span>Buckets</span>
           <b>{buckets.length}</b>
-        </button>
-        {bucketsOpen && buckets.length > 0 ? (
-          buckets.map((bucket) => (
-            <button
-              className={view === "buckets" && selectedBucketId === bucket.id ? "settings-link active" : "settings-link"}
-              key={bucket.id}
-              onClick={() => onBucketOpen(bucket.id)}
-              disabled={!bucket.configured}
-              title={bucket.description}
-            >
-              <Server size={16} />
-              <span>{bucket.name}</span>
-              <b>{bucket.configured ? "R2" : "Off"}</b>
-            </button>
-          ))
-        ) : bucketsOpen ? (
-          <button className="settings-link" disabled>
-            <Server size={16} />
-            <span>No buckets</span>
-            <b>Off</b>
-          </button>
-        ) : null}
+        </div>
+        <CustomSelect
+          value={selectedBucketId ?? bucketOptions[0]?.value ?? ""}
+          onChange={(value) => {
+            if (value) onBucketOpen(value);
+          }}
+          disabled={bucketOptions.length === 0 || buckets.length === 0}
+          options={bucketOptions}
+          title="Bucket"
+        />
       </div>
 
       <div className="sidebar-section">
@@ -2994,6 +2993,7 @@ function BucketsView({
   const [uploading, setUploading] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const dialog = useAppDialog();
+  const bucketOptions = bucketOptionsForSelect(buckets);
   const selectedObject = objects.find((object) => object.key === selectedKey) ?? null;
 
   async function loadObjects(nextPrefix = prefix, nextCursor: string | null = null, append = false) {
@@ -3084,10 +3084,16 @@ function BucketsView({
   return (
     <section className="bucket-shell">
       <div className="bucket-toolbar">
-        <div className="bucket-current">
+        <div className="bucket-current bucket-select">
           <span>Bucket</span>
-          <strong>{activeBucket?.name ?? "MAIL_BUCKET"}</strong>
-          <small>{activeBucket?.binding ?? "MAIL_BUCKET"} binding</small>
+          <CustomSelect
+            value={activeBucket?.id ?? bucketOptions[0]?.value ?? ""}
+            onChange={(value) => onBucketChange(value || null)}
+            disabled={buckets.length === 0}
+            options={bucketOptions}
+            title="Bucket"
+          />
+          <small>{activeBucket?.description ?? "R2 bucket"}</small>
         </div>
         <div className="bucket-actions">
           <label className={uploading ? "button primary file-button is-loading" : "button primary file-button"}>

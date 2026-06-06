@@ -603,6 +603,8 @@ type BucketBinding = {
   bucket: R2Bucket;
 };
 
+const reservedBucketDiscoveryBindings = new Set(["ASSETS", "DB", "EMAIL"]);
+
 function listAvailableBuckets(env: RuntimeEnv): BucketInfo[] {
   const configured = Boolean(env.MAIL_BUCKET);
   const displayNames = parseExtraR2Buckets(env.EXTRA_R2_BUCKETS);
@@ -619,11 +621,11 @@ function listAvailableBuckets(env: RuntimeEnv): BucketInfo[] {
   ];
 
   for (const binding of [...extraBindings].sort((left, right) => left.localeCompare(right))) {
-    if (binding === "MAIL_BUCKET") continue;
+    if (binding === "MAIL_BUCKET" || reservedBucketDiscoveryBindings.has(binding)) continue;
     const bucket = r2BucketFromEnv(env, binding);
     buckets.push({
       id: bucketIdForBinding(binding),
-      name: displayNames.get(binding) ?? binding,
+      name: displayNames.get(binding) ?? humanizeBucketBinding(binding),
       binding,
       configured: Boolean(bucket),
       writable: Boolean(bucket),
@@ -655,7 +657,9 @@ function parseExtraR2Buckets(value?: string): Map<string, string> {
 
 function discoverR2BindingNames(env: RuntimeEnv): string[] {
   const source = env as unknown as Record<string, unknown>;
-  return Object.keys(source).filter((key) => key !== "MAIL_BUCKET" && isR2Bucket(source[key]));
+  return Object.keys(source).filter(
+    (key) => key !== "MAIL_BUCKET" && !reservedBucketDiscoveryBindings.has(key) && isR2Bucket(source[key])
+  );
 }
 
 function r2BucketFromEnv(env: RuntimeEnv, binding: string): R2Bucket | null {
@@ -691,7 +695,19 @@ function getBucketBinding(env: RuntimeEnv, bucketId: string): BucketBinding {
 }
 
 function runtimeBucketName(env: RuntimeEnv): string {
-  return env.R2_BUCKET_NAME?.trim() || "MAIL_BUCKET";
+  return env.R2_BUCKET_NAME?.trim() || "Mail bucket";
+}
+
+function humanizeBucketBinding(binding: string): string {
+  const label = binding
+    .replace(/_?R2_?/gi, "_")
+    .replace(/_?BUCKET$/i, "")
+    .replace(/_/g, " ")
+    .trim();
+  if (!label) return binding;
+  return label
+    .toLowerCase()
+    .replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
 }
 
 function readR2Prefix(url: URL): string {

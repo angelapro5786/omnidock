@@ -3,6 +3,7 @@ import fs from "node:fs";
 const CONFIG_PATH = envValue("OMNIDOCK_CONFIG_PATH") || "wrangler.jsonc";
 const PLACEHOLDER_D1_ID = "00000000-0000-0000-0000-000000000000";
 const PLACEHOLDER_R2_BUCKET = "omnidock-mail";
+const RESERVED_R2_BINDINGS = new Set(["ASSETS", "DB", "EMAIL", "MAIL_BUCKET"]);
 
 const d1DatabaseId = envValue("OMNIDOCK_D1_DATABASE_ID");
 const d1DatabaseName = envValue("OMNIDOCK_D1_DATABASE_NAME") || "omnidock-db";
@@ -40,10 +41,13 @@ for (const bucket of extraR2Buckets) {
 
 if (r2Bindings.length > 0) {
   config.r2_buckets = r2Bindings;
+  syncR2DisplayVars(config);
   changed = true;
 } else if (removeR2Placeholder(config)) {
   changed = true;
   console.warn("OmniDock removed the public MAIL_BUCKET placeholder from this deploy config.");
+} else if (syncR2DisplayVars(config)) {
+  changed = true;
 }
 
 if (changed) {
@@ -79,6 +83,37 @@ function removeR2Placeholder(config) {
   return true;
 }
 
+function syncR2DisplayVars(config) {
+  const buckets = Array.isArray(config.r2_buckets) ? config.r2_buckets : [];
+  const mailBucket = buckets.find((item) => item?.binding === "MAIL_BUCKET" && item.bucket_name && item.bucket_name !== PLACEHOLDER_R2_BUCKET);
+  const extraBuckets = buckets
+    .filter((item) => item?.binding && item.bucket_name && !RESERVED_R2_BINDINGS.has(item.binding))
+    .map((item) => `${item.binding}:${item.bucket_name}`);
+  let changed = false;
+
+  if (mailBucket && upsertVar(config, "R2_BUCKET_NAME", mailBucket.bucket_name)) {
+    changed = true;
+  }
+
+  if (extraBuckets.length > 0 && upsertVar(config, "EXTRA_R2_BUCKETS", extraBuckets.join(","))) {
+    changed = true;
+  }
+
+  return changed;
+}
+
+function upsertVar(config, name, value) {
+  if (!value) return false;
+  config.vars = isPlainObject(config.vars) ? config.vars : {};
+  if (config.vars[name] === value) return false;
+  config.vars[name] = value;
+  return true;
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 function envValue(name) {
   return process.env[name]?.trim() || "";
 }
@@ -95,7 +130,7 @@ function parseExtraR2Buckets(value) {
     if (!separator) continue;
     const binding = item.slice(0, item.indexOf(separator)).trim();
     const bucketName = item.slice(item.indexOf(separator) + 1).trim();
-    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(binding) || !bucketName || seen.has(binding)) continue;
+    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(binding) || !bucketName || seen.has(binding) || RESERVED_R2_BINDINGS.has(binding)) continue;
     seen.add(binding);
     buckets.push({ binding, bucket_name: bucketName });
   }

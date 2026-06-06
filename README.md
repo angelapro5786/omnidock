@@ -186,8 +186,8 @@ Cloudflare does not create empty variable rows from the repository. Add one row 
 | Secret | `ADMIN_PASSWORD` | First admin password, at least 12 characters | Required before first setup |
 | Plaintext variable | `PRIMARY_DOMAIN` | First managed email domain, for example `example.com` | Required before first setup |
 | Secret | `CLOUDFLARE_API_TOKEN` | Cloudflare API token | Required before first setup |
-| Plaintext variable | `R2_BUCKET_NAME` | R2 bucket display name, for example `omnidock-mail` | Optional, shown in the Buckets sidebar |
-| Plaintext variable | `EXTRA_R2_BUCKETS` | Extra R2 display list, for example `FILES_BUCKET:Files` | Optional, shown in the Buckets sidebar |
+| Plaintext variable | `R2_BUCKET_NAME` | Primary R2 bucket display name | Optional override; normally generated from `OMNIDOCK_R2_BUCKET_NAME` |
+| Plaintext variable | `EXTRA_R2_BUCKETS` | Extra R2 display list, for example `FILES_BUCKET:my-files-bucket` | Optional override; normally generated from `OMNIDOCK_EXTRA_R2_BUCKETS` |
 | Plaintext variable | `WORKER_SCRIPT_NAME` | Deployed Worker script name, for example `omnidock` | Add when OmniDock should create Email Routing rules |
 | Plaintext variable | `MANAGEMENT_HOST` | Custom dashboard hostname, for example `mail.example.com` | Optional |
 | Plaintext variable | `PASSWORD_RESET_FROM` | Verified reset sender, for example `no-reply@example.com` | Optional |
@@ -207,7 +207,7 @@ D1, R2, and Email Sending are bindings, not secrets.
 | `MAIL_BUCKET` | Cloudflare R2 bucket |
 | `EMAIL` | Cloudflare Email Sending binding |
 
-The running Worker must receive `DB` as a D1 binding and `MAIL_BUCKET` as an R2 binding. `R2_BUCKET_NAME` is only a display variable for the Buckets UI; it does not grant R2 access.
+The running Worker must receive `DB` as a D1 binding and `MAIL_BUCKET` as an R2 binding. R2 bucket names are copied into runtime display variables during deploy so the Buckets UI can show real bucket names instead of binding names.
 
 ### Extra R2 Buckets
 
@@ -217,7 +217,7 @@ To add another bucket:
 
 1. In Cloudflare, open the Worker settings.
 2. Go to Bindings and add an R2 bucket binding.
-3. Use a binding variable name such as `FILES_BUCKET`, `ASSETS_BUCKET`, or `PRIVATE_BUCKET`.
+3. Use a binding variable name such as `FILES_BUCKET`, `MEDIA_BUCKET`, or `PRIVATE_BUCKET`. Do not use the reserved `ASSETS` binding name.
 4. Select the real R2 bucket resource you want to connect.
 5. For Git deploys, add build variable `OMNIDOCK_EXTRA_R2_BUCKETS` with the deploy mapping:
 
@@ -231,13 +231,7 @@ For multiple buckets:
 OMNIDOCK_EXTRA_R2_BUCKETS=FILES_BUCKET:my-files-bucket,PRIVATE_BUCKET:private-files
 ```
 
-6. For the UI label, add runtime plaintext variable `EXTRA_R2_BUCKETS`:
-
-```dotenv
-EXTRA_R2_BUCKETS=FILES_BUCKET:Files,PRIVATE_BUCKET:Private files
-```
-
-The value before `:` is the Worker binding name. The value after `:` is either the real R2 bucket name for build variables or the display label for runtime variables.
+The value before `:` is the Worker binding name. The value after `:` is the real R2 bucket name. OmniDock uses that same bucket name in the Buckets dropdown.
 
 ## First Login
 
@@ -282,7 +276,7 @@ Other Settings controls automatic refresh. The default is 10 seconds and can be 
 
 ### Buckets
 
-The Buckets sidebar opens a dropdown of configured R2 bindings. `MAIL_BUCKET` is always the primary mail bucket. Extra bindings from `EXTRA_R2_BUCKETS` appear in the same dropdown. You can browse folder prefixes, preview supported file types, upload files, download objects, and delete objects.
+The Buckets sidebar opens a dropdown of configured R2 buckets. `MAIL_BUCKET` is always the primary mail bucket. Extra buckets from `OMNIDOCK_EXTRA_R2_BUCKETS` appear in the same dropdown with their real bucket names. You can browse folder prefixes, preview supported file types, upload files, download objects, and delete objects.
 
 ## Custom Domain
 
@@ -352,7 +346,7 @@ npx wrangler secret put ADMIN_PASSWORD
 npx wrangler secret put CLOUDFLARE_API_TOKEN
 ```
 
-Set plaintext variables such as `PRIMARY_DOMAIN`, `WORKER_SCRIPT_NAME`, `MANAGEMENT_HOST`, `PASSWORD_RESET_FROM`, `R2_BUCKET_NAME`, `EXTRA_R2_BUCKETS`, and `CLOUDFLARE_ACCOUNT_ID` in the Cloudflare dashboard. For private installs only, you may keep plaintext values under `vars` in your private `wrangler.jsonc`; do not commit personal values to a public fork.
+Set plaintext variables such as `PRIMARY_DOMAIN`, `WORKER_SCRIPT_NAME`, `MANAGEMENT_HOST`, `PASSWORD_RESET_FROM`, and `CLOUDFLARE_ACCOUNT_ID` in the Cloudflare dashboard. `R2_BUCKET_NAME` and `EXTRA_R2_BUCKETS` are generated from the R2 deploy mapping unless you intentionally override the display names. For private installs only, you may keep plaintext values under `vars` in your private `wrangler.jsonc`; do not commit personal values to a public fork.
 
 ## Local Development
 
