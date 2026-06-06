@@ -150,6 +150,18 @@ export function errorResponse(error: unknown): Response {
     );
   }
 
+  const databaseError = databaseReadinessError(error);
+  if (databaseError) {
+    console.error(error);
+    return json(
+      {
+        ok: false,
+        error: databaseError
+      },
+      { status: databaseError.status }
+    );
+  }
+
   console.error(error);
   return json(
     {
@@ -161,6 +173,31 @@ export function errorResponse(error: unknown): Response {
     },
     { status: 500 }
   );
+}
+
+function databaseReadinessError(error: unknown): { status: number; code: string; message: string } | null {
+  if (!(error instanceof Error)) {
+    return null;
+  }
+
+  const message = error.message.toLowerCase();
+  if (message.includes("no such table") || message.includes("no such column")) {
+    return {
+      status: 503,
+      code: "database_migration_required",
+      message: "D1 database is not ready. Run remote migrations, then try logging in again."
+    };
+  }
+
+  if (message.includes("cannot read properties of undefined") && message.includes("prepare")) {
+    return {
+      status: 503,
+      code: "database_binding_missing",
+      message: "D1 binding DB is not configured for this Worker."
+    };
+  }
+
+  return null;
 }
 
 export function methodNotAllowed(): Response {

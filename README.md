@@ -122,6 +122,21 @@ You will be asked to configure:
 | D1 database name | Yes | Default is `emailfox-db`; Cloudflare can provision it. |
 | R2 bucket name | Yes | Cloudflare can provision it during deploy. |
 
+Every deployer must provide their own secrets in Cloudflare during setup. Do not put real values in `wrangler.jsonc`, README files, screenshots, issues, or commits.
+
+Use Cloudflare secrets for:
+
+- `ADMIN_PASSWORD_BOOTSTRAP`
+- `CLOUDFLARE_API_TOKEN`
+
+Use plain Worker vars only for non-secret values:
+
+- `MANAGEMENT_HOST`
+- `CLOUDFLARE_ACCOUNT_ID`
+- `WORKER_SCRIPT_NAME`
+
+`database_id` is not a Worker secret. Wrangler needs it as D1 binding configuration for remote deploy/migration commands. For the public template, leave it out so one-click deploy can provision the deployer's own D1 database. For a private/manual deployment, add the deployer's own `database_id` locally or through the deploy platform configuration, never as a committed personal value.
+
 The deploy script runs:
 
 ```bash
