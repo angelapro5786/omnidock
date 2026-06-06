@@ -258,7 +258,7 @@ export function App() {
     email: string;
     recoveryEmail: string;
     primaryDomain: string;
-    password: string;
+    password?: string | null;
   }) {
     setBusy(true);
     try {
