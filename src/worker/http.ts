@@ -7,6 +7,7 @@ export type RuntimeEnv = Env & {
   MANAGEMENT_HOST?: string;
   PRIMARY_DOMAIN?: string;
   PASSWORD_RESET_FROM?: string;
+  WORKER_SCRIPT_NAME?: string;
 };
 
 export class ApiError extends Error {

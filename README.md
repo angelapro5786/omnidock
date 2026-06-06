@@ -23,7 +23,7 @@ Emailfox is not an IMAP/POP3 server and does not replace a full mailbox provider
 
 Click the button at the top of this README and follow Cloudflare's setup flow.
 
-Use the Deploy to Cloudflare button flow for first installs. Importing the Git repository manually from Workers & Pages may skip the resource wizard; in that case the build will stop until `DOMAINS`, D1, and R2 are configured.
+Use the Deploy to Cloudflare button flow for first installs. Importing the Git repository manually from Workers & Pages may skip the resource wizard; in that case the build will stop until D1 and R2 are configured.
 
 Cloudflare's Deploy to Cloudflare flow will:
 
@@ -128,33 +128,26 @@ If your token can access exactly one Cloudflare account, Emailfox detects that a
 
 During one-click deploy, Cloudflare reads:
 
-- `wrangler.jsonc` for Worker, D1, R2, assets, and env vars
-- `package.json` scripts and Cloudflare binding descriptions
+- `wrangler.jsonc` for Worker, D1, R2, and assets
 - `package.json` scripts and Cloudflare binding descriptions
 
 The `API token` dropdown in Cloudflare's deploy screen is for Workers Builds, meaning the token Cloudflare uses to build and deploy this repository. Emailfox's optional runtime `CLOUDFLARE_API_TOKEN` is advanced and is intentionally not part of the one-click deploy form.
 
-You will be asked to configure:
+You should only need to configure Cloudflare resources during deploy:
 
 | Value | Required | Notes |
 | --- | --- | --- |
-| `DOMAINS` | Yes | Main email domain for first setup. Replace the `example.com` placeholder before build. |
-| `WORKER_SCRIPT_NAME` | Yes | Keep this equal to the Worker script name selected in Cloudflare's deploy screen. |
 | D1 database name | Yes | Default is `emailfox-db`; Cloudflare can provision it. |
 | R2 bucket name | Yes | Cloudflare can provision it during deploy. |
 
-No secrets are required during the first one-click deploy. Do not put real values in `wrangler.jsonc`, README files, screenshots, issues, or commits.
-
-Use plain Worker vars only for non-secret values:
-
-- `DOMAINS`
-- `WORKER_SCRIPT_NAME`
+Domain, admin name, recovery email, and password are configured later in Emailfox's first setup screen. No secrets are required during the first one-click deploy. Do not put real values in `wrangler.jsonc`, README files, screenshots, issues, or commits.
 
 Advanced/manual installs may also add non-secret Worker vars later:
 
 - `MANAGEMENT_HOST` for a custom dashboard hostname.
 - `PASSWORD_RESET_FROM` for a verified password reset sender. If omitted, Emailfox sends reset mail from `emailfox@<default-domain>`.
 - `CLOUDFLARE_ACCOUNT_ID` when one API token can access multiple Cloudflare accounts.
+- `WORKER_SCRIPT_NAME` when you want Emailfox to create Email Routing rules automatically. Set it to the deployed Worker script name.
 
 These advanced values are intentionally not part of the one-click deploy form.
 
@@ -168,7 +161,7 @@ The deploy script runs:
 npm run build && npm run db:migrate:remote && wrangler deploy
 ```
 
-`npm run build` first runs `tools/validate-deploy-config.mjs`. The build stops if `DOMAINS` is still `example.com`, if the D1 `database_id` is still the placeholder UUID, if the R2 bucket binding is missing, or if `WORKER_SCRIPT_NAME` is blank. Maintainers working on the public template can bypass only this local template check with `EMAILFOX_SKIP_CONFIG_CHECK=1 npm run build`.
+`npm run build` first runs `tools/validate-deploy-config.mjs`. The build stops if the D1 `database_id` is still the placeholder UUID or if the R2 bucket binding is missing. Maintainers working on the public template can bypass only this local template check with `EMAILFOX_SKIP_CONFIG_CHECK=1 npm run build`.
 
 Cloudflare provisions the D1/R2 resources before running the configured deploy command in the one-click flow. The migration command then uses the binding name `DB`, which is important because deployers may rename the actual D1 database.
 
@@ -186,9 +179,9 @@ After deploy:
 1. Open the Worker URL shown by Cloudflare.
 2. Complete the setup screen with name, email, recovery email, primary domain, and password.
 3. Log in with the password you just created.
-4. Click `Sync Cloudflare`.
-5. Create mailboxes such as `support`, `info`, or `billing`.
-6. Use `Settings > Rules` to route addresses to the Worker.
+4. Create mailboxes such as `support`, `info`, or `billing`.
+5. Use `Settings > Rules` to route addresses to the Worker.
+6. Optional: add the advanced `CLOUDFLARE_API_TOKEN` secret, then click `Sync Cloudflare` to automate Cloudflare inventory and routing checks.
 
 ## Custom Domain
 
