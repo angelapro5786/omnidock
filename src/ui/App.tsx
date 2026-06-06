@@ -47,6 +47,7 @@ import {
   FolderKey,
   MailboxRow,
   MailboxSignatureRow,
+  RuntimeRequirement,
   SetupStatusPayload,
   ThreadPayload,
   ThreadRow
@@ -652,10 +653,61 @@ function LoginScreen({
   );
 }
 
+function ConfigurationScreen({
+  busy,
+  error,
+  requirements,
+  onRetry,
+  palette,
+  onPaletteChange
+}: {
+  busy: boolean;
+  error: string | null;
+  requirements: RuntimeRequirement[];
+  onRetry: () => void;
+  palette: PaletteKey;
+  onPaletteChange: (palette: PaletteKey) => void;
+}) {
+  return (
+    <main className="login-shell">
+      <div className="login-tools">
+        <PaletteChooser value={palette} onChange={onPaletteChange} />
+      </div>
+      <section className="login-box">
+        <div className="brand-block">
+          <img src="/emailfox-mark.svg" alt="" />
+          <div>
+            <h1>Emailfox</h1>
+            <p>{window.location.host || "Cloudflare Workers"}</p>
+          </div>
+        </div>
+        <div className="login-error">
+          <AlertTriangle size={15} />
+          <span>{error ?? "Complete Cloudflare setup before first login."}</span>
+        </div>
+        <div className="requirement-list">
+          {requirements.map((item) => (
+            <div className="requirement-row" key={`${item.kind}:${item.name}`}>
+              <span>{item.kind}</span>
+              <code>{item.name}</code>
+              <p>{item.message}</p>
+            </div>
+          ))}
+        </div>
+        <button className="button ghost wide" type="button" onClick={onRetry} disabled={busy}>
+          <RefreshCw size={16} />
+          Retry setup check
+        </button>
+      </section>
+    </main>
+  );
+}
+
 function SetupScreen({
   busy,
   defaultDomain,
   error,
+  passwordFromSecret,
   onSubmit,
   palette,
   onPaletteChange
@@ -663,12 +715,13 @@ function SetupScreen({
   busy: boolean;
   defaultDomain: string;
   error: string | null;
+  passwordFromSecret: boolean;
   onSubmit: (input: {
     name: string;
     email: string;
     recoveryEmail: string;
     primaryDomain: string;
-    password: string;
+    password?: string | null;
   }) => Promise<void>;
   palette: PaletteKey;
   onPaletteChange: (palette: PaletteKey) => void;
@@ -683,7 +736,7 @@ function SetupScreen({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (password !== confirm) {
+    if (!passwordFromSecret && password !== confirm) {
       setLocalError("Passwords do not match");
       return;
     }
@@ -705,7 +758,7 @@ function SetupScreen({
       email,
       recoveryEmail: recoveryEmail.trim(),
       primaryDomain,
-      password
+      password: passwordFromSecret ? null : password
     });
   }
 
@@ -773,30 +826,39 @@ function SetupScreen({
           placeholder="example.com"
           required
         />
-        <label className="field-label" htmlFor="setup-password">
-          Password
-        </label>
-        <input
-          id="setup-password"
-          className="text-input"
-          type="password"
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          minLength={12}
-          required
-        />
-        <label className="field-label" htmlFor="setup-confirm">
-          Confirm password
-        </label>
-        <input
-          id="setup-confirm"
-          className="text-input"
-          type="password"
-          value={confirm}
-          onChange={(event) => setConfirm(event.target.value)}
-          minLength={12}
-          required
-        />
+        {passwordFromSecret ? (
+          <div className="auth-check">
+            <ShieldCheck size={15} />
+            <span>Password will be read from the ADMIN_PASSWORD secret.</span>
+          </div>
+        ) : (
+          <>
+            <label className="field-label" htmlFor="setup-password">
+              Password
+            </label>
+            <input
+              id="setup-password"
+              className="text-input"
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              minLength={12}
+              required
+            />
+            <label className="field-label" htmlFor="setup-confirm">
+              Confirm password
+            </label>
+            <input
+              id="setup-confirm"
+              className="text-input"
+              type="password"
+              value={confirm}
+              onChange={(event) => setConfirm(event.target.value)}
+              minLength={12}
+              required
+            />
+          </>
+        )}
         <button className="button primary wide" type="submit" disabled={busy}>
           <ShieldCheck size={16} />
           Create admin
