@@ -1,6 +1,6 @@
 # EmailFox
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/OWNER/REPO)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/ufukayyildiz/emailfox)
 
 Emailfox is a private, multi-domain email management panel for Cloudflare Workers, Cloudflare Email Sending, Cloudflare Email Routing, D1, and R2.
 
@@ -15,7 +15,7 @@ It gives you a compact Linux-style webmail/support inbox for domains in your own
 - Import contacts manually or from CSV/TXT/VCF files into D1
 - Manage mailbox-specific signatures
 - Send outbound attachments while storing copies in R2
-- Choose between five UI palettes: Mint, Ubuntu, Fedora, Plasma, Graphite
+- Choose between five UI palettes: Linux, Ubuntu, Fedora, Plasma, Graphite
 
 Emailfox is not an IMAP/POP3 server and does not replace a full mailbox provider. It is best for private support inboxes, project inboxes, catch-all workflows, and lightweight multi-domain email operations that already live on Cloudflare.
 
@@ -28,8 +28,9 @@ Cloudflare's Deploy to Cloudflare flow will:
 1. Clone this public repository into your own GitHub or GitLab account.
 2. Let you choose the new repository name, Worker name, and resource names.
 3. Provision supported resources from `wrangler.jsonc`, including D1 and R2.
-4. Run the configured build/deploy command.
-5. Configure Workers Builds so future pushes can deploy automatically.
+4. Inject the generated resource IDs into the deployer's copied repository.
+5. Run the configured build/deploy command, including D1 migrations.
+6. Configure Workers Builds so future pushes can deploy automatically.
 
 This is not a normal GitHub fork requirement. Cloudflare creates a new repository copy in the deployer's Git provider account during the deploy flow.
 
@@ -106,7 +107,7 @@ If your token can access exactly one Cloudflare account, leave `CLOUDFLARE_ACCOU
 During one-click deploy, Cloudflare reads:
 
 - `wrangler.jsonc` for Worker, D1, R2, assets, and env vars
-- `.dev.vars.example` for required secrets
+- `.dev.vars.example` for required secrets such as `CLOUDFLARE_API_TOKEN`
 - `package.json` scripts and Cloudflare binding descriptions
 
 You will be asked to configure:
@@ -135,15 +136,15 @@ Use plain Worker vars only for non-secret values:
 - `PASSWORD_RESET_FROM`
 - `WORKER_SCRIPT_NAME`
 
-`database_id` is not a Worker secret. Wrangler needs it as D1 binding configuration for remote deploy/migration commands. For the public template, leave it out so one-click deploy can provision the deployer's own D1 database. For a private/manual deployment, add the deployer's own `database_id` locally or through the deploy platform configuration, never as a committed personal value.
+`database_id` is not a Worker secret, but it is account-specific. For the public template, leave it out so one-click deploy can provision the deployer's own D1 database and write the generated ID into that deployer's copied repository. For a private/manual deployment, add the deployer's own `database_id` locally or through the deploy platform configuration, never as a committed personal value.
 
 The deploy script runs:
 
 ```bash
-npm run build && wrangler deploy && npm run db:migrate:remote
+npm run build && npm run db:migrate:remote && wrangler deploy
 ```
 
-The first `wrangler deploy` call lets Cloudflare provision missing D1/R2 resources. D1 migrations then use the binding name `DB`, which is important for one-click deploy because users may rename the actual D1 database.
+Cloudflare provisions the D1/R2 resources before running the configured deploy command in the one-click flow. The migration command then uses the binding name `DB`, which is important because deployers may rename the actual D1 database.
 
 If the Cloudflare setup screen asks for commands, use:
 
@@ -155,12 +156,11 @@ If the Cloudflare setup screen asks for commands, use:
 After deploy:
 
 1. Open the Worker URL shown by Cloudflare.
-2. Enter the `ADMIN_PASSWORD_BOOTSTRAP` value.
-3. Emailfox creates the D1 password hash.
-4. Click `Sync Cloudflare`.
-5. Select a domain.
-6. Create mailboxes such as `support`, `info`, or `billing`.
-7. Use `Settings > Rules` to route addresses to the Worker.
+2. Create the first admin from the setup screen with name, email, and password.
+3. Click `Sync Cloudflare`.
+4. Select a domain.
+5. Create mailboxes such as `support`, `info`, or `billing`.
+6. Use `Settings > Rules` to route addresses to the Worker.
 
 ## Custom Domain
 
@@ -232,13 +232,7 @@ Optionally edit non-secret vars in `wrangler.jsonc`:
 }
 ```
 
-Apply migrations:
-
-```bash
-npm run db:migrate:remote
-```
-
-Deploy:
+Build, apply remote migrations, and deploy:
 
 ```bash
 npm run deploy
@@ -256,6 +250,11 @@ Edit `.dev.vars`:
 
 ```dotenv
 CLOUDFLARE_API_TOKEN=replace-with-a-cloudflare-api-token
+```
+
+Optional local-only values:
+
+```dotenv
 PASSWORD_RESET_FROM=no-reply@example.com
 ADMIN_PASSWORD_BOOTSTRAP=
 ```

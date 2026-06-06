@@ -24,12 +24,14 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "emailfox-db"
+      "database_name": "emailfox-db",
+      "migrations_dir": "migrations"
     }
   ],
   "r2_buckets": [
     {
-      "binding": "MAIL_BUCKET"
+      "binding": "MAIL_BUCKET",
+      "bucket_name": "emailfox-mail"
     }
   ],
   "send_email": [
