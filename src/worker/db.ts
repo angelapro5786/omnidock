@@ -677,10 +677,28 @@ export async function listThreads(
     }
   }
 
-  if (options.query) {
-    const like = `%${options.query.trim()}%`;
-    filters.push("(m.subject LIKE ? OR m.from_address LIKE ? OR m.snippet LIKE ? OR m.mailbox LIKE ?)");
-    params.push(like, like, like, like);
+  const searchTerm = options.query?.trim();
+  if (searchTerm) {
+    const like = `%${searchTerm}%`;
+    filters.push(
+      `EXISTS (
+        SELECT 1 FROM messages q
+        WHERE q.thread_id = m.thread_id
+          AND (
+            q.subject LIKE ?
+            OR q.from_address LIKE ?
+            OR q.to_json LIKE ?
+            OR q.cc_json LIKE ?
+            OR q.bcc_json LIKE ?
+            OR q.snippet LIKE ?
+            OR q.text_body LIKE ?
+            OR q.html_body LIKE ?
+            OR q.mailbox LIKE ?
+            OR q.domain LIKE ?
+          )
+      )`
+    );
+    params.push(like, like, like, like, like, like, like, like, like, like);
   }
 
   const where = filters.length > 0 ? filters.join(" AND ") : "1 = 1";

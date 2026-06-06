@@ -407,20 +407,30 @@ button:hover:not(:disabled) {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  height: 54px;
+  height: 64px;
   padding: 8px 14px;
   background: linear-gradient(var(--titlebar), var(--titlebar-strong));
   border-bottom: 1px solid var(--line-strong);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.58);
 }
 
+.mail-search {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(210px, 300px);
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
+  max-width: 980px;
+  min-width: 0;
+}
+
 .search-wrap {
   display: flex;
   align-items: center;
   gap: 8px;
-  width: min(460px, 100%);
-  height: 34px;
-  padding: 0 10px;
+  width: 100%;
+  height: 42px;
+  padding: 0 13px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--control);
@@ -434,6 +444,33 @@ button:hover:not(:disabled) {
   outline: 0;
   background: transparent;
   color: var(--text);
+  font-size: 15px;
+}
+
+.search-scope {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.search-scope span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.search-scope select {
+  width: 100%;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--control);
+  color: var(--text);
+  padding: 0 28px 0 9px;
+  outline: none;
+  font: 12px/1 var(--mono);
 }
 
 .topbar-title {
@@ -462,6 +499,7 @@ button:hover:not(:disabled) {
 .topbar-actions {
   display: flex;
   align-items: center;
+  flex: 0 0 auto;
   gap: 8px;
 }
 
@@ -642,7 +680,7 @@ button:hover:not(:disabled) {
   display: grid;
   grid-template-columns: minmax(300px, 390px) minmax(420px, 1fr);
   gap: 0;
-  height: calc(100vh - 110px);
+  height: calc(100vh - 120px);
   min-height: 0;
   margin: 10px 14px 18px;
   border: 1px solid var(--line-strong);
@@ -745,13 +783,13 @@ button:hover:not(:disabled) {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 12px;
-  height: calc(100vh - 110px);
+  height: calc(100vh - 120px);
   min-height: 0;
   margin: 10px 14px 18px;
 }
 
 .settings-shell {
-  height: calc(100vh - 110px);
+  height: calc(100vh - 120px);
   min-height: 0;
   margin: 10px 14px 18px;
 }
@@ -1754,6 +1792,10 @@ button:hover:not(:disabled) {
     grid-template-columns: 210px minmax(0, 1fr);
   }
 
+  .mail-search {
+    grid-template-columns: minmax(260px, 1fr) minmax(170px, 230px);
+  }
+
   .main-grid {
     grid-template-columns: minmax(280px, 340px) minmax(360px, 1fr);
   }
@@ -1828,5 +1870,15 @@ button:hover:not(:disabled) {
   .reply-tools {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .topbar {
+    height: auto;
+  }
+
+  .mail-search {
+    grid-template-columns: 1fr;
+    max-width: none;
+    width: 100%;
   }
 }

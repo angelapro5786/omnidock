@@ -171,7 +171,7 @@ export function App() {
           : defaultDomain?.id ?? data.domains[0]?.id ?? null
       );
       setSelectedMailboxId((current) =>
-        current && data.mailboxes.some((mailbox) => mailbox.id === current) ? current : data.mailboxes[0]?.id ?? null
+        current && data.mailboxes.some((mailbox) => mailbox.id === current) ? current : null
       );
       setActiveThreadId((current) => (hasMailboxes ? null : current ?? data.threads[0]?.thread_id ?? null));
       setLoginError(null);
@@ -430,6 +430,12 @@ export function App() {
   const signatures = bootstrap.signatures;
   const activeDomain = domains.find((domain) => domain.id === selectedDomainId) ?? null;
   const activeMailbox = mailboxes.find((mailbox) => mailbox.id === selectedMailboxId) ?? null;
+  const changeMailboxScope = (mailboxId: string | null) => {
+    setSelectedMailboxId(mailboxId);
+    setThreads([]);
+    setActiveThreadId(null);
+    setThread(null);
+  };
 
   async function handleThreadAction(action: "archive" | "unarchive") {
     await loadBootstrap();
@@ -446,12 +452,7 @@ export function App() {
         folder={folder}
         view={view}
         selectedMailboxId={selectedMailboxId}
-        onMailboxChange={(mailboxId) => {
-          setSelectedMailboxId(mailboxId);
-          setThreads([]);
-          setActiveThreadId(null);
-          setThread(null);
-        }}
+        onMailboxChange={changeMailboxScope}
         onFolderChange={(nextFolder) => {
           setFolder(nextFolder);
           setView("mail");
@@ -463,9 +464,26 @@ export function App() {
       <main className="workspace">
         <header className="topbar">
           {view === "mail" ? (
-            <div className="search-wrap">
-              <Search size={16} />
-              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search threads" />
+            <div className="mail-search">
+              <div className="search-wrap">
+                <Search size={18} />
+                <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search subject, body, sender, recipient" />
+              </div>
+              <label className="search-scope">
+                <span>Account</span>
+                <select
+                  value={selectedMailboxId ?? ""}
+                  onChange={(event) => changeMailboxScope(event.target.value || null)}
+                  disabled={mailboxes.length === 0}
+                >
+                  <option value="">All mailboxes</option>
+                  {mailboxes.map((mailbox) => (
+                    <option key={mailbox.id} value={mailbox.id}>
+                      {mailbox.address}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
           ) : (
             <SettingsTitle view={view} activeDomain={activeDomain} domains={domains} />
@@ -563,7 +581,7 @@ export function App() {
           emailfox
         </span>
         <span>{activeDomain?.domain ?? `${domains.length} domains`}</span>
-        <span>{activeMailbox?.address ?? "No mailbox"}</span>
+        <span>{activeMailbox?.address ?? "All mailboxes"}</span>
         <span>{mailboxes.length} mailboxes</span>
         <span>{activePalette.label}</span>
       </footer>
@@ -1258,8 +1276,6 @@ function Sidebar({
   onSettingsOpen: (view: SettingsViewKey) => void;
   onLock: () => void;
 }) {
-  const activeMailbox = mailboxes.find((mailbox) => mailbox.id === selectedMailboxId) ?? mailboxes[0] ?? null;
-
   return (
     <aside className="sidebar">
       <div className="brand-row">
@@ -1273,18 +1289,21 @@ function Sidebar({
       <label className="mailbox-switcher">
         <span>Mailbox</span>
         <select
-          value={activeMailbox?.id ?? ""}
+          value={selectedMailboxId ?? ""}
           onChange={(event) => onMailboxChange(event.target.value || null)}
           disabled={mailboxes.length === 0}
         >
           {mailboxes.length === 0 ? (
             <option value="">No mailboxes</option>
           ) : (
-            mailboxes.map((mailbox) => (
-              <option key={mailbox.id} value={mailbox.id}>
-                {mailbox.address}
-              </option>
-            ))
+            <>
+              <option value="">All mailboxes</option>
+              {mailboxes.map((mailbox) => (
+                <option key={mailbox.id} value={mailbox.id}>
+                  {mailbox.address}
+                </option>
+              ))}
+            </>
           )}
         </select>
       </label>
@@ -1970,7 +1989,7 @@ function ThreadList({
       <div className="pane-head">
         <div>
           <span>{folder}</span>
-          <strong>{activeMailbox?.address ?? "No mailbox"}</strong>
+          <strong>{activeMailbox?.address ?? "All mailboxes"}</strong>
           <small>{threads.length} threads</small>
         </div>
         <FolderGit2 size={16} />
