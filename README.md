@@ -37,17 +37,16 @@ Recommended install flow:
 2. Open Cloudflare Workers & Pages.
 3. Create a D1 database and an R2 bucket for Emailfox.
 4. Create a Worker from Git and select your fork.
-5. Add the D1/R2 deploy variables listed below, then deploy the Worker.
-6. Add the runtime variables and secrets listed below in Worker settings.
-7. Open the Worker URL and finish setup inside the app.
+5. In `Settings > Build > Build configuration`, add the build variables listed below.
+6. Set the deploy command so Emailfox can preserve D1/R2 bindings.
+7. Add the runtime variables and secrets listed below in Worker settings.
+8. Open the Worker URL and finish setup inside the app.
 
-First deploys can run before D1/R2 are connected. Emailfox will show a setup checklist in the app until `DB`, `MAIL_BUCKET`, `EMAIL`, `ADMIN_PASSWORD`, `PRIMARY_DOMAIN`, and `CLOUDFLARE_API_TOKEN` are configured.
-
-Normal Git updates should include real D1/R2 build variables so Wrangler keeps your resource bindings attached.
+Do not rely on dashboard-added D1/R2 bindings alone. Wrangler treats the deploy configuration as the source of truth, so a Git deploy can remove dashboard bindings when the deploy config does not include them.
 
 ## Updating an Existing Install
 
-For updates, use your fork. Pull or merge Emailfox upstream updates into that fork, keep your Worker bindings and secrets in Cloudflare, then let Workers Builds run `npm run deploy`.
+For updates, use your fork. Pull or merge Emailfox upstream updates into that fork, keep your Worker bindings and secrets in Cloudflare, then let Workers Builds run the commands below.
 
 The deploy script can preserve existing bindings from Cloudflare when `CLOUDFLARE_API_TOKEN` is available to the build command. The safest path is still to keep the deploy variables below set on every Git deploy:
 
@@ -56,6 +55,15 @@ npm run build && node tools/deploy-preserving-bindings.mjs
 ```
 
 Wrangler treats its config file as the source of truth. A plain `wrangler deploy` can remove dashboard-added D1/R2 bindings if they are not present in the deploy config. Emailfox adds `DB` and `MAIL_BUCKET` during build from `EMAILFOX_D1_DATABASE_ID` and `EMAILFOX_R2_BUCKET_NAME`, and uses `tools/deploy-preserving-bindings.mjs` for local deploys. If it cannot preserve both `DB` and `MAIL_BUCKET` on an existing Worker, the local deploy helper stops before Wrangler can remove them.
+
+In Cloudflare Workers Builds, do not use a bare deploy command of `npx wrangler deploy` for Emailfox updates. Use one of these:
+
+| Cloudflare field | Recommended value |
+| --- | --- |
+| Build command | `npm run build` |
+| Deploy command | `node tools/deploy-preserving-bindings.mjs` |
+
+Alternative: leave the Build command empty and set Deploy command to `npm run deploy`.
 
 ## 0. Prepare Cloudflare First
 
@@ -121,13 +129,30 @@ Recommended permissions:
 
 If your token can access exactly one Cloudflare account, Emailfox detects that account automatically. If it can access multiple accounts, add `CLOUDFLARE_ACCOUNT_ID` as a plaintext variable too.
 
-## Cloudflare Variables And Secrets
+## Cloudflare Build Variables
+
+Add these in the screen shown under:
+
+`Worker > Settings > Build > Build configuration > Variables and secrets`
+
+These values are build-time only. They are used so Wrangler deploys the Worker with the correct resource bindings. They are not runtime secrets for the app UI.
+
+| Name | Value to type | Required |
+| --- | --- | --- |
+| `EMAILFOX_D1_DATABASE_ID` | Your D1 database id | Yes |
+| `EMAILFOX_D1_DATABASE_NAME` | Your D1 database name, for example `emailfox-db` | No, defaults to `emailfox-db` |
+| `EMAILFOX_R2_BUCKET_NAME` | Your R2 bucket name, for example `emailfox-mail` | Yes |
+| `CLOUDFLARE_ACCOUNT_ID` | Your Cloudflare account id | Only if the build token can access multiple accounts |
+
+If these are missing, a deploy can disconnect `DB` or `MAIL_BUCKET`. Add them before first real deploy and keep them for every Git update.
+
+## Runtime Variables And Secrets
 
 After deploy, open:
 
 `Worker > Settings > Variables and Secrets > Add`
 
-Add Emailfox runtime settings in that Cloudflare screen. Use `Secret` only for sensitive values. Use plaintext variables for non-sensitive routing and display values.
+Add Emailfox runtime settings in that Cloudflare screen. This is a different screen from Build configuration. Use `Secret` only for sensitive values. Use plaintext variables for non-sensitive routing and display values.
 
 Cloudflare does not create empty rows from the repository. Add one row for each value you need: choose the `Type`, paste the exact value from `Name` into the Cloudflare `Name` field, type your own value into `Value`, then save.
 
@@ -153,18 +178,6 @@ D1 and R2 are not secrets. Add them as Cloudflare bindings/resources:
 
 Bindings cannot be replaced by Worker secrets. The running Worker must receive `DB` as a D1 binding and `MAIL_BUCKET` as an R2 binding.
 
-For Git deploys, add these build/deploy variables too. Emailfox uses them while building to add the real `DB` and `MAIL_BUCKET` bindings, so Cloudflare deploys the Worker with the same resources every time.
-
-| Name | Value to type | When to add |
-| --- | --- | --- |
-| `EMAILFOX_D1_DATABASE_ID` | Your D1 database id | Required before normal Git deploys |
-| `EMAILFOX_D1_DATABASE_NAME` | Your D1 database name, for example `emailfox-db` | Optional, defaults to `emailfox-db` |
-| `EMAILFOX_R2_BUCKET_NAME` | Your R2 bucket name, for example `emailfox-mail` | Required before normal Git deploys |
-
-If `EMAILFOX_D1_DATABASE_ID` and `EMAILFOX_R2_BUCKET_NAME` are missing in a Git deploy, the public template deploys without fake D1/R2 resource ids and the app will show the missing binding checklist. Add those two build variables before regular updates so existing bindings are not dropped.
-
-The public template does not commit a personal D1 `database_id`. If you intentionally deploy unbound, Emailfox shows the missing binding names on the Worker URL. For normal installs, do not leave the Worker unbound.
-
 The deploy script runs:
 
 ```bash
@@ -180,7 +193,9 @@ For binding-safe deploys, make `CLOUDFLARE_API_TOKEN` available to the build/dep
 If the Cloudflare Git deploy screen asks for commands, use:
 
 - Build command: `npm run build`
-- Deploy command: `npm run deploy`
+- Deploy command: `node tools/deploy-preserving-bindings.mjs`
+
+If you prefer one command only, leave Build command empty and use Deploy command: `npm run deploy`.
 
 ## First Login
 
