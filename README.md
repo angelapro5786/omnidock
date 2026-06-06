@@ -140,9 +140,10 @@ These values are build-time only. They are used so Wrangler deploys the Worker w
 | Name | Value to type | Required |
 | --- | --- | --- |
 | `EMAILFOX_D1_DATABASE_ID` | Your D1 database id | Yes |
-| `EMAILFOX_D1_DATABASE_NAME` | Your D1 database name, for example `emailfox-db` | No, defaults to `emailfox-db` |
 | `EMAILFOX_R2_BUCKET_NAME` | Your R2 bucket name, for example `emailfox-mail` | Yes |
 | `CLOUDFLARE_ACCOUNT_ID` | Your Cloudflare account id | Only if the build token can access multiple accounts |
+
+You normally do not need to set `EMAILFOX_D1_DATABASE_NAME`. Wrangler's D1 binding format needs a `database_name`, but Emailfox fills it as `emailfox-db` automatically. Set `EMAILFOX_D1_DATABASE_NAME` only if you want the generated deploy config to show a different D1 display name.
 
 If these are missing, a deploy can disconnect `DB` or `MAIL_BUCKET`. Add them before first real deploy and keep them for every Git update.
 
