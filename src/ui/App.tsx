@@ -57,6 +57,7 @@ import {
 
 const PASSWORD_KEY = "emailfox.password";
 const PALETTE_KEY = "emailfox.palette";
+const DEFAULT_MAILBOX_KEY = "emailfox.defaultMailbox";
 
 const folders: { key: FolderKey; label: string; icon: typeof Inbox }[] = [
   { key: "inbox", label: "Inbox", icon: Inbox },
@@ -104,6 +105,7 @@ export function App() {
   const [view, setView] = useState<ViewKey>("mail");
   const [selectedDomainId, setSelectedDomainId] = useState<string | null>(null);
   const [selectedMailboxId, setSelectedMailboxId] = useState<string | null>(null);
+  const [defaultMailboxId, setDefaultMailboxId] = useState(() => localStorage.getItem(DEFAULT_MAILBOX_KEY) ?? "");
   const [folderStats, setFolderStats] = useState<Record<string, number>>({});
   const [query, setQuery] = useState("");
   const [threads, setThreads] = useState<ThreadRow[]>([]);
@@ -171,9 +173,23 @@ export function App() {
           ? current
           : defaultDomain?.id ?? data.domains[0]?.id ?? null
       );
-      setSelectedMailboxId((current) =>
-        current && data.mailboxes.some((mailbox) => mailbox.id === current) ? current : null
-      );
+      setSelectedMailboxId((current) => {
+        if (current && data.mailboxes.some((mailbox) => mailbox.id === current)) return current;
+
+        const storedDefaultId = localStorage.getItem(DEFAULT_MAILBOX_KEY) ?? "";
+        const storedDefaultMailbox = data.mailboxes.find((mailbox) => mailbox.id === storedDefaultId);
+        if (storedDefaultMailbox) {
+          setDefaultMailboxId(storedDefaultMailbox.id);
+          return storedDefaultMailbox.id;
+        }
+
+        if (storedDefaultId) {
+          localStorage.removeItem(DEFAULT_MAILBOX_KEY);
+          setDefaultMailboxId("");
+        }
+
+        return data.mailboxes[0]?.id ?? null;
+      });
       setActiveThreadId((current) => (hasMailboxes ? null : current ?? data.threads[0]?.thread_id ?? null));
       setLoginError(null);
       setNotice(null);
@@ -437,6 +453,19 @@ export function App() {
     setActiveThreadId(null);
     setThread(null);
   };
+  const defaultMailbox = mailboxes.find((mailbox) => mailbox.id === defaultMailboxId) ?? null;
+  const setDefaultMailboxPreference = () => {
+    if (!activeMailbox) {
+      localStorage.removeItem(DEFAULT_MAILBOX_KEY);
+      setDefaultMailboxId("");
+      setNotice("Default mailbox cleared");
+      return;
+    }
+
+    localStorage.setItem(DEFAULT_MAILBOX_KEY, activeMailbox.id);
+    setDefaultMailboxId(activeMailbox.id);
+    setNotice(`Default mailbox set to ${activeMailbox.address}`);
+  };
 
   async function handleThreadAction(action: "archive" | "unarchive" | "delete") {
     await loadBootstrap();
@@ -470,12 +499,12 @@ export function App() {
                 <Search size={18} />
                 <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search subject, body, sender, recipient" />
               </div>
-              <label className="search-scope">
-                <span>Account</span>
+              <div className="search-scope" aria-label="Mailbox scope">
                 <select
                   value={selectedMailboxId ?? ""}
                   onChange={(event) => changeMailboxScope(event.target.value || null)}
                   disabled={mailboxes.length === 0}
+                  title="Mailbox scope"
                 >
                   <option value="">All mailboxes</option>
                   {mailboxes.map((mailbox) => (
@@ -484,7 +513,29 @@ export function App() {
                     </option>
                   ))}
                 </select>
-              </label>
+                <button
+                  className={activeMailbox && defaultMailbox?.id === activeMailbox.id ? "icon-button default-active" : "icon-button"}
+                  type="button"
+                  onClick={setDefaultMailboxPreference}
+                  disabled={mailboxes.length === 0}
+                  title={
+                    activeMailbox
+                      ? defaultMailbox?.id === activeMailbox.id
+                        ? `${activeMailbox.address} opens by default`
+                        : `Open ${activeMailbox.address} by default`
+                      : "Use all mailboxes as the default view"
+                  }
+                  aria-label={
+                    activeMailbox
+                      ? defaultMailbox?.id === activeMailbox.id
+                        ? `${activeMailbox.address} is the default mailbox`
+                        : `Set ${activeMailbox.address} as default mailbox`
+                      : "Clear default mailbox"
+                  }
+                >
+                  <Star size={16} />
+                </button>
+              </div>
             </div>
           ) : (
             <SettingsTitle view={view} activeDomain={activeDomain} domains={domains} />
@@ -1489,6 +1540,7 @@ function RulesView({
   const routedAddresses = domainMailboxes
     .filter((mailbox) => mailbox.routing_enabled === 1)
     .map((mailbox) => mailbox.address);
+  const receivingReady = catchAllActive || routedAddresses.length > 0 || selectedDomain?.routing_enabled === 1;
   const receivingStatus = selectedDomain ? describeReceiving(selectedDomain, routedAddresses, catchAllActive) : null;
   const sendingStatus = selectedDomain ? describeSending(selectedDomain) : null;
 
@@ -1568,7 +1620,7 @@ function RulesView({
           <div className="status-matrix">
             <StatusPill ok={isDefaultDomain} label={isDefaultDomain ? "Default domain" : "Not default"} />
             <StatusPill ok={selectedDomain.sending_enabled === 1} label="Verified sending" />
-            <StatusPill ok={selectedDomain.routing_enabled === 1} label="Routing ready" />
+            <StatusPill ok={receivingReady} label={receivingReady ? "Receiving active" : "Routing inactive"} />
             <StatusPill ok={catchAllActive} label="Catch-all" />
             <StatusPill ok={routedCount > 0 || catchAllActive} label={`${catchAllActive ? "All" : routedCount} routed`} />
           </div>
@@ -2466,14 +2518,6 @@ function describeReceiving(
   routedAddresses: string[],
   catchAllActive: boolean
 ): { title: string; text: string; tone: "ok" | "warn" | "info" } {
-  if (domain.routing_enabled !== 1) {
-    return {
-      title: "Cannot receive yet",
-      text: "Email Routing is not active for this domain. Enable routing in Cloudflare, then run Sync Cloudflare.",
-      tone: "warn"
-    };
-  }
-
   if (catchAllActive) {
     return {
       title: `Receives every address at @${domain.domain}`,
@@ -2484,14 +2528,25 @@ function describeReceiving(
 
   if (routedAddresses.length > 0) {
     return {
-      title: `Receives only ${formatAddressList(routedAddresses)}`,
-      text: `Other @${domain.domain} addresses will not arrive until you enable catch-all or route each mailbox.`,
-      tone: "info"
+      title: `Receives ${formatAddressList(routedAddresses)}`,
+      text:
+        domain.routing_enabled === 1
+          ? `Only routed addresses arrive. Other @${domain.domain} addresses need catch-all or their own Worker route.`
+          : "A mailbox Worker route is active. Cloudflare domain status was not reported by sync, but routed addresses can receive mail.",
+      tone: "ok"
+    };
+  }
+
+  if (domain.routing_enabled !== 1) {
+    return {
+      title: "Cannot receive yet",
+      text: "Email Routing is not active for this domain. Enable routing in Cloudflare, then run Sync Cloudflare.",
+      tone: "warn"
     };
   }
 
   return {
-    title: "Does not receive any address yet",
+    title: "Routing enabled, no address route yet",
     text: "Create a mailbox with Worker rule enabled, route an existing mailbox, or enable catch-all.",
     tone: "warn"
   };
