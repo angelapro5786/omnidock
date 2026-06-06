@@ -2,21 +2,16 @@ import fs from "node:fs";
 
 const CONFIG_PATH = process.env.EMAILFOX_CONFIG_PATH || "wrangler.jsonc";
 const PLACEHOLDER_D1_ID = "00000000-0000-0000-0000-000000000000";
+const PLACEHOLDER_R2_BUCKET = "emailfox-mail";
 
 const d1DatabaseId = process.env.EMAILFOX_D1_DATABASE_ID?.trim();
 const d1DatabaseName = process.env.EMAILFOX_D1_DATABASE_NAME?.trim() || "emailfox-db";
 const r2BucketName = process.env.EMAILFOX_R2_BUCKET_NAME?.trim();
-const allowUnboundDeploy = process.env.EMAILFOX_ALLOW_UNBOUND_DEPLOY === "1";
 
 const config = readJsonc(CONFIG_PATH);
 let changed = false;
 
-if (allowUnboundDeploy && !d1DatabaseId && !r2BucketName) {
-  delete config.d1_databases;
-  delete config.r2_buckets;
-  changed = true;
-  console.warn("Emailfox removed DB/R2 placeholders for an intentional unbound first deploy.");
-} else if (d1DatabaseId && d1DatabaseId !== PLACEHOLDER_D1_ID) {
+if (d1DatabaseId && d1DatabaseId !== PLACEHOLDER_D1_ID) {
   config.d1_databases = [
     {
       binding: "DB",
@@ -26,6 +21,9 @@ if (allowUnboundDeploy && !d1DatabaseId && !r2BucketName) {
     }
   ];
   changed = true;
+} else if (removeD1Placeholder(config)) {
+  changed = true;
+  console.warn("Emailfox removed the public DB placeholder from this deploy config.");
 }
 
 if (r2BucketName) {
@@ -36,11 +34,42 @@ if (r2BucketName) {
     }
   ];
   changed = true;
+} else if (removeR2Placeholder(config)) {
+  changed = true;
+  console.warn("Emailfox removed the public MAIL_BUCKET placeholder from this deploy config.");
 }
 
 if (changed) {
   fs.writeFileSync(CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`);
   console.log(`Emailfox prepared ${CONFIG_PATH} for this build.`);
+}
+
+function removeD1Placeholder(config) {
+  if (!Array.isArray(config.d1_databases)) return false;
+  const next = config.d1_databases.filter(
+    (item) => !(item?.binding === "DB" && (!item.database_id || item.database_id === PLACEHOLDER_D1_ID))
+  );
+  if (next.length === config.d1_databases.length) return false;
+  if (next.length > 0) {
+    config.d1_databases = next;
+  } else {
+    delete config.d1_databases;
+  }
+  return true;
+}
+
+function removeR2Placeholder(config) {
+  if (!Array.isArray(config.r2_buckets)) return false;
+  const next = config.r2_buckets.filter(
+    (item) => !(item?.binding === "MAIL_BUCKET" && (!item.bucket_name || item.bucket_name === PLACEHOLDER_R2_BUCKET))
+  );
+  if (next.length === config.r2_buckets.length) return false;
+  if (next.length > 0) {
+    config.r2_buckets = next;
+  } else {
+    delete config.r2_buckets;
+  }
+  return true;
 }
 
 function readJsonc(path) {

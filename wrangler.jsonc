@@ -13,24 +13,9 @@
     "binding": "ASSETS",
     "directory": "./dist/client"
   },
-  // Public-safe placeholders. `npm run build` replaces these from
-  // EMAILFOX_D1_DATABASE_ID and EMAILFOX_R2_BUCKET_NAME when they are available
-  // in Cloudflare build variables. If they are not replaced, Cloudflare deploy
-  // fails instead of silently disconnecting dashboard-created bindings.
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "emailfox-db",
-      "database_id": "00000000-0000-0000-0000-000000000000",
-      "migrations_dir": "migrations"
-    }
-  ],
-  "r2_buckets": [
-    {
-      "binding": "MAIL_BUCKET",
-      "bucket_name": "emailfox-mail"
-    }
-  ],
+  // D1/R2 bindings are added at build time when EMAILFOX_D1_DATABASE_ID and
+  // EMAILFOX_R2_BUCKET_NAME are configured. The public template intentionally
+  // avoids fake resource ids so first deploys do not fail.
   "send_email": [
     {
       "name": "EMAIL"

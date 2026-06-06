@@ -41,9 +41,9 @@ Recommended install flow:
 6. Add the runtime variables and secrets listed below in Worker settings.
 7. Open the Worker URL and finish setup inside the app.
 
-Normal deploys need real D1/R2 values before Cloudflare runs Wrangler. The repository contains public-safe placeholders so an update cannot silently remove your dashboard bindings. If the values are missing, deploy should fail rather than disconnect `DB` or `MAIL_BUCKET`.
+First deploys can run before D1/R2 are connected. Emailfox will show a setup checklist in the app until `DB`, `MAIL_BUCKET`, `EMAIL`, `ADMIN_PASSWORD`, `PRIMARY_DOMAIN`, and `CLOUDFLARE_API_TOKEN` are configured.
 
-For an intentionally empty first deploy only, set `EMAILFOX_ALLOW_UNBOUND_DEPLOY=1`. Remove it before any real install or update.
+Normal Git updates should include real D1/R2 build variables so Wrangler keeps your resource bindings attached.
 
 ## Updating an Existing Install
 
@@ -55,7 +55,7 @@ The deploy script can preserve existing bindings from Cloudflare when `CLOUDFLAR
 npm run build && node tools/deploy-preserving-bindings.mjs
 ```
 
-Wrangler treats its config file as the source of truth. A plain `wrangler deploy` can remove dashboard-added D1/R2 bindings if they are not present in the deploy config. Emailfox keeps public placeholders in `wrangler.jsonc`, replaces them during build from `EMAILFOX_D1_DATABASE_ID` and `EMAILFOX_R2_BUCKET_NAME`, and uses `tools/deploy-preserving-bindings.mjs` for local deploys. If it cannot preserve both `DB` and `MAIL_BUCKET` on an existing Worker, it stops before Wrangler can remove them.
+Wrangler treats its config file as the source of truth. A plain `wrangler deploy` can remove dashboard-added D1/R2 bindings if they are not present in the deploy config. Emailfox adds `DB` and `MAIL_BUCKET` during build from `EMAILFOX_D1_DATABASE_ID` and `EMAILFOX_R2_BUCKET_NAME`, and uses `tools/deploy-preserving-bindings.mjs` for local deploys. If it cannot preserve both `DB` and `MAIL_BUCKET` on an existing Worker, the local deploy helper stops before Wrangler can remove them.
 
 ## 0. Prepare Cloudflare First
 
@@ -153,16 +153,15 @@ D1 and R2 are not secrets. Add them as Cloudflare bindings/resources:
 
 Bindings cannot be replaced by Worker secrets. The running Worker must receive `DB` as a D1 binding and `MAIL_BUCKET` as an R2 binding.
 
-For Git deploys, add these build/deploy variables too. Emailfox uses them while building to replace the public placeholders in `wrangler.jsonc`, so Cloudflare deploys the Worker with the same `DB` and `MAIL_BUCKET` bindings every time.
+For Git deploys, add these build/deploy variables too. Emailfox uses them while building to add the real `DB` and `MAIL_BUCKET` bindings, so Cloudflare deploys the Worker with the same resources every time.
 
 | Name | Value to type | When to add |
 | --- | --- | --- |
 | `EMAILFOX_D1_DATABASE_ID` | Your D1 database id | Required before normal Git deploys |
 | `EMAILFOX_D1_DATABASE_NAME` | Your D1 database name, for example `emailfox-db` | Optional, defaults to `emailfox-db` |
 | `EMAILFOX_R2_BUCKET_NAME` | Your R2 bucket name, for example `emailfox-mail` | Required before normal Git deploys |
-| `EMAILFOX_ALLOW_UNBOUND_DEPLOY` | `1` | First deploy only, if you intentionally deploy before adding D1/R2 |
 
-If `EMAILFOX_D1_DATABASE_ID` and `EMAILFOX_R2_BUCKET_NAME` are missing, Emailfox tries to read the current Worker bindings from Cloudflare using `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` when those values are available to the build command. If it cannot preserve both `DB` and `MAIL_BUCKET` on an existing Worker, deploy stops before Wrangler can remove dashboard bindings.
+If `EMAILFOX_D1_DATABASE_ID` and `EMAILFOX_R2_BUCKET_NAME` are missing in a Git deploy, the public template deploys without fake D1/R2 resource ids and the app will show the missing binding checklist. Add those two build variables before regular updates so existing bindings are not dropped.
 
 The public template does not commit a personal D1 `database_id`. If you intentionally deploy unbound, Emailfox shows the missing binding names on the Worker URL. For normal installs, do not leave the Worker unbound.
 

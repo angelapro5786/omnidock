@@ -2,18 +2,23 @@ import fs from "node:fs";
 
 const STRICT_FLAG = "EMAILFOX_STRICT_CONFIG_CHECK";
 const PLACEHOLDER_D1_ID = "00000000-0000-0000-0000-000000000000";
+const PLACEHOLDER_R2_BUCKET = "emailfox-mail";
 
 const config = readJsonc("wrangler.jsonc");
 const warnings = [];
 
 const d1 = Array.isArray(config.d1_databases) ? config.d1_databases.find((item) => item.binding === "DB") : null;
-if (d1 && (!d1.database_id || d1.database_id === PLACEHOLDER_D1_ID)) {
-  warnings.push("DB.database_id is still the public placeholder. Set EMAILFOX_D1_DATABASE_ID as a Cloudflare build variable before normal deploys.");
+if (!d1) {
+  warnings.push("DB binding is not in the deploy config. First deploy can continue, but set EMAILFOX_D1_DATABASE_ID before normal Git updates.");
+} else if (!d1.database_id || d1.database_id === PLACEHOLDER_D1_ID) {
+  warnings.push("DB.database_id is still the public placeholder. Emailfox will remove it unless EMAILFOX_D1_DATABASE_ID is set.");
 }
 
 const r2 = Array.isArray(config.r2_buckets) ? config.r2_buckets.find((item) => item.binding === "MAIL_BUCKET") : null;
-if (r2 && !r2.bucket_name) {
-  warnings.push("MAIL_BUCKET has no bucket_name. Set EMAILFOX_R2_BUCKET_NAME as a Cloudflare build variable before normal deploys.");
+if (!r2) {
+  warnings.push("MAIL_BUCKET binding is not in the deploy config. First deploy can continue, but set EMAILFOX_R2_BUCKET_NAME before normal Git updates.");
+} else if (!r2.bucket_name || r2.bucket_name === PLACEHOLDER_R2_BUCKET) {
+  warnings.push("MAIL_BUCKET uses the public placeholder bucket name. Emailfox will remove it unless EMAILFOX_R2_BUCKET_NAME is set.");
 }
 
 if (warnings.length > 0) {
@@ -23,7 +28,7 @@ if (warnings.length > 0) {
   for (const warning of warnings) {
     output(`- ${warning}`);
   }
-  output("Normal Cloudflare deploys should receive real build variables, otherwise Wrangler may reject the placeholder D1 binding.");
+  output("The Worker will show setup requirements at runtime until DB and MAIL_BUCKET are connected.");
   if (strict) {
     process.exit(1);
   }
