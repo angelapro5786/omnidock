@@ -10,7 +10,7 @@ export type RuntimeRequirement = {
 };
 
 export function configuredAdminPassword(env: RuntimeEnv): string {
-  return (env.ADMIN_PASSWORD ?? env.ADMIN_PASSWORD_BOOTSTRAP ?? "").trim();
+  return (env.ADMIN_PASSWORD ?? "").trim();
 }
 
 export function configuredPrimaryDomain(env: RuntimeEnv): string | null {

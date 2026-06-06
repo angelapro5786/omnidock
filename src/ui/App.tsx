@@ -800,6 +800,10 @@ function SetupScreen({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (passwordFromSecret && !password.trim()) {
+      setLocalError("Admin password is required");
+      return;
+    }
     if (!passwordFromSecret && password !== confirm) {
       setLocalError("Passwords do not match");
       return;
@@ -822,7 +826,7 @@ function SetupScreen({
       email,
       recoveryEmail: recoveryEmail.trim(),
       primaryDomain,
-      password: passwordFromSecret ? null : password
+      password
     });
   }
 
@@ -891,10 +895,24 @@ function SetupScreen({
           required
         />
         {passwordFromSecret ? (
-          <div className="auth-check">
-            <ShieldCheck size={15} />
-            <span>Password will be read from the ADMIN_PASSWORD secret.</span>
-          </div>
+          <>
+            <label className="field-label" htmlFor="setup-password">
+              Admin password
+            </label>
+            <input
+              id="setup-password"
+              className="text-input"
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              minLength={12}
+              required
+            />
+            <div className="auth-check">
+              <ShieldCheck size={15} />
+              <span>Enter the ADMIN_PASSWORD secret once to claim this install.</span>
+            </div>
+          </>
         ) : (
           <>
             <label className="field-label" htmlFor="setup-password">

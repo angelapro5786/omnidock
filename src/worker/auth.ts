@@ -70,9 +70,13 @@ export async function createAdminAccount(
   normalizeAdminEmail(input.email);
   const recoveryEmail = normalizeAdminEmail(input.recoveryEmail);
   validateExternalRecoveryEmail(recoveryEmail, input.primaryDomain);
-  const password = input.password?.trim() || configuredAdminPassword(env);
+  const password = configuredAdminPassword(env);
+  const setupPassword = input.password?.trim() ?? "";
   if (!password) {
     throw new ApiError(409, "admin_password_secret_missing", "Add ADMIN_PASSWORD as a Worker secret first.");
+  }
+  if (!setupPassword || !(await securePlainEqual(setupPassword, password))) {
+    throw new ApiError(401, "unauthorized", "Invalid setup password");
   }
   validatePassword(password);
 

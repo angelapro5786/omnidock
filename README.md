@@ -100,10 +100,11 @@ After the first deploy, add the required runtime values: `ADMIN_PASSWORD` as a s
 - Email
 - Recovery email, required and outside the primary domain
 - Primary domain
+- Admin password, which must match the `ADMIN_PASSWORD` secret
 
 The recovery email is the password reset recipient. Use an external address such as a Gmail, iCloud, Outlook, or company mailbox that is not under the primary Emailfox domain.
 
-The first password is read from the `ADMIN_PASSWORD` Worker secret and then stored as a salted PBKDF2 hash in D1.
+The first password is read from the `ADMIN_PASSWORD` Worker secret, verified once on the setup screen, and then stored as a salted PBKDF2 hash in D1.
 
 ### Cloudflare Automation Token
 
