@@ -1,4 +1,13 @@
-import { BootstrapPayload, ContactRow, DomainRow, ExternalAccountRow, SetupStatusPayload, ThreadPayload, ThreadRow } from "./types";
+import {
+  BootstrapPayload,
+  BucketObjectsPayload,
+  ContactRow,
+  DomainRow,
+  ExternalAccountRow,
+  SetupStatusPayload,
+  ThreadPayload,
+  ThreadRow
+} from "./types";
 
 export type AttachmentDraft = {
   filename: string;
@@ -219,6 +228,49 @@ export class ApiClient {
     return response.blob();
   }
 
+  listBucketObjects(bucketId: string, prefix: string, cursor?: string | null): Promise<BucketObjectsPayload> {
+    const params = new URLSearchParams();
+    if (prefix) params.set("prefix", prefix);
+    if (cursor) params.set("cursor", cursor);
+    const suffix = params.toString() ? `?${params.toString()}` : "";
+    return this.request<BucketObjectsPayload>(`/api/buckets/${encodeURIComponent(bucketId)}/objects${suffix}`);
+  }
+
+  async downloadBucketObject(bucketId: string, key: string): Promise<Blob> {
+    const response = await fetch(`/api/buckets/${encodeURIComponent(bucketId)}/object?key=${encodeURIComponent(key)}`, {
+      headers: {
+        authorization: `Bearer ${this.password}`
+      }
+    });
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as { error?: { message?: string } } | null;
+      throw new ApiRequestError(response.status, payload?.error?.message ?? `Download failed with ${response.status}`);
+    }
+    return response.blob();
+  }
+
+  async uploadBucketObject(bucketId: string, key: string, file: File): Promise<unknown> {
+    const response = await fetch(`/api/buckets/${encodeURIComponent(bucketId)}/object?key=${encodeURIComponent(key)}`, {
+      method: "PUT",
+      headers: {
+        authorization: `Bearer ${this.password}`,
+        "content-type": file.type || "application/octet-stream"
+      },
+      body: file
+    });
+    return readApiResponse(response);
+  }
+
+  async deleteBucketObject(bucketId: string, key: string): Promise<unknown> {
+    const response = await fetch(`/api/buckets/${encodeURIComponent(bucketId)}/object?key=${encodeURIComponent(key)}`, {
+      method: "DELETE",
+      headers: {
+        authorization: `Bearer ${this.password}`
+      }
+    });
+    return readApiResponse(response);
+  }
+
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const response = await fetch(path, {
       ...init,
@@ -239,6 +291,18 @@ export class ApiClient {
 
     return payload as T;
   }
+}
+
+async function readApiResponse<T = unknown>(response: Response): Promise<T> {
+  const payload = (await response.json().catch(() => null)) as
+    | { ok?: boolean; error?: { message?: string } }
+    | null;
+
+  if (!response.ok || payload?.ok === false) {
+    throw new ApiRequestError(response.status, payload?.error?.message ?? `Request failed with ${response.status}`);
+  }
+
+  return payload as T;
 }
 
 async function publicRequest<T>(path: string, init: RequestInit = {}): Promise<T> {

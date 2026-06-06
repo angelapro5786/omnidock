@@ -57,6 +57,9 @@ import {
 import {
   AttachmentRow,
   BootstrapPayload,
+  BucketFolderRow,
+  BucketObjectRow,
+  BucketRow,
   ContactRow,
   DomainRow,
   ExternalAccountRow,
@@ -81,9 +84,9 @@ const folders: { key: FolderKey; label: string; icon: typeof Inbox }[] = [
   { key: "archive", label: "Archive", icon: Archive }
 ];
 
-type ViewKey = "mail" | "rules" | "contacts" | "signatures" | "external" | "other-settings";
+type ViewKey = "mail" | "buckets" | "rules" | "contacts" | "signatures" | "external" | "other-settings";
 type PaletteKey = "mint" | "ubuntu" | "fedora" | "plasma" | "graphite";
-type SettingsViewKey = Exclude<ViewKey, "mail">;
+type SettingsViewKey = Exclude<ViewKey, "mail" | "buckets">;
 type AuthViewKey = "checking" | "configuration" | "login" | "setup" | "reset-request" | "reset-confirm";
 type RichEditorValue = { html: string; text: string };
 type SelectOption = {
@@ -112,6 +115,7 @@ const palettes: {
 
 const MAX_CLIENT_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const MAX_CLIENT_TOTAL_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+const MAX_BUCKET_INLINE_PREVIEW_BYTES = 10 * 1024 * 1024;
 
 const externalProviderPresets: Record<
   string,
@@ -203,6 +207,7 @@ export function App() {
   const [view, setView] = useState<ViewKey>("mail");
   const [selectedDomainId, setSelectedDomainId] = useState<string | null>(null);
   const [selectedMailboxId, setSelectedMailboxId] = useState<string | null>(null);
+  const [selectedBucketId, setSelectedBucketId] = useState<string | null>(null);
   const [defaultMailboxId, setDefaultMailboxId] = useState(() => localStorage.getItem(DEFAULT_MAILBOX_KEY) ?? "");
   const [refreshIntervalSeconds, setRefreshIntervalSeconds] = useState(initialRefreshIntervalSeconds);
   const [folderStats, setFolderStats] = useState<Record<string, number>>({});
@@ -229,6 +234,7 @@ export function App() {
     setThread(null);
     setSelectedDomainId(null);
     setSelectedMailboxId(null);
+    setSelectedBucketId(null);
     setFolderStats({});
     setComposeOpen(false);
   }, []);
@@ -289,6 +295,9 @@ export function App() {
 
         return data.mailboxes[0]?.id ?? null;
       });
+      setSelectedBucketId((current) =>
+        current && data.buckets.some((bucket) => bucket.id === current) ? current : data.buckets[0]?.id ?? null
+      );
       setActiveThreadId((current) => (hasMailboxes ? null : current ?? data.threads[0]?.thread_id ?? null));
       setLoginError(null);
       setNotice(null);
@@ -570,8 +579,10 @@ export function App() {
   const contacts = bootstrap.contacts;
   const signatures = bootstrap.signatures;
   const externalAccounts = bootstrap.externalAccounts ?? [];
+  const buckets = bootstrap.buckets ?? [];
   const activeDomain = domains.find((domain) => domain.id === selectedDomainId) ?? null;
   const activeMailbox = mailboxes.find((mailbox) => mailbox.id === selectedMailboxId) ?? null;
+  const activeBucket = buckets.find((bucket) => bucket.id === selectedBucketId) ?? buckets[0] ?? null;
   const changeMailboxScope = (mailboxId: string | null) => {
     setSelectedMailboxId(mailboxId);
     setThreads([]);
@@ -607,12 +618,18 @@ export function App() {
       <Sidebar
         managementHost={bootstrap?.managementHost ?? window.location.host}
         mailboxes={mailboxes}
+        buckets={buckets}
         stats={folderStats}
         folder={folder}
         view={view}
         selectedMailboxId={selectedMailboxId}
+        selectedBucketId={selectedBucketId}
         refreshIntervalSeconds={refreshIntervalSeconds}
         onMailboxChange={changeMailboxScope}
+        onBucketOpen={(bucketId) => {
+          setSelectedBucketId(bucketId);
+          setView("buckets");
+        }}
         onFolderChange={(nextFolder) => {
           setFolder(nextFolder);
           setView("mail");
@@ -664,6 +681,8 @@ export function App() {
                 </button>
               </div>
             </div>
+          ) : view === "buckets" ? (
+            <BucketTitle bucket={activeBucket} />
           ) : (
             <SettingsTitle view={view} activeDomain={activeDomain} domains={domains} />
           )}
@@ -710,7 +729,15 @@ export function App() {
           </div>
         ) : null}
 
-        {view === "rules" ? (
+        {view === "buckets" ? (
+          <BucketsView
+            api={api}
+            buckets={buckets}
+            activeBucketId={selectedBucketId}
+            onBucketChange={setSelectedBucketId}
+            onNotice={setNotice}
+          />
+        ) : view === "rules" ? (
           <RulesView
             api={api}
             domains={domains}
@@ -772,7 +799,7 @@ export function App() {
           emailfox
         </span>
         <span>{activeDomain?.domain ?? `${domains.length} domains`}</span>
-        <span>{activeMailbox?.address ?? "All mailboxes"}</span>
+        <span>{view === "buckets" ? activeBucket?.name ?? "Buckets" : activeMailbox?.address ?? "All mailboxes"}</span>
         <span>{mailboxes.length} mailboxes</span>
         <span>{activePalette.label}</span>
       </footer>
@@ -1507,7 +1534,7 @@ function SettingsTitle({
   activeDomain,
   domains
 }: {
-  view: ViewKey;
+  view: SettingsViewKey;
   activeDomain: DomainRow | null;
   domains: DomainRow[];
 }) {
@@ -1538,7 +1565,7 @@ function SettingsTitle({
       icon: SlidersHorizontal
     }
   };
-  const item = labels[view === "mail" ? "rules" : view];
+  const item = labels[view];
   const Icon = item.icon;
 
   return (
@@ -1552,27 +1579,45 @@ function SettingsTitle({
   );
 }
 
+function BucketTitle({ bucket }: { bucket: BucketRow | null }) {
+  return (
+    <div className="topbar-title">
+      <Server size={18} />
+      <div>
+        <strong>Buckets</strong>
+        <span>{bucket?.name ?? "R2 storage"}</span>
+      </div>
+    </div>
+  );
+}
+
 function Sidebar({
   managementHost,
   mailboxes,
+  buckets,
   stats,
   folder,
   view,
   selectedMailboxId,
+  selectedBucketId,
   refreshIntervalSeconds,
   onMailboxChange,
+  onBucketOpen,
   onFolderChange,
   onSettingsOpen,
   onLock
 }: {
   managementHost: string;
   mailboxes: MailboxRow[];
+  buckets: BucketRow[];
   stats: Record<string, number>;
   folder: FolderKey;
   view: ViewKey;
   selectedMailboxId: string | null;
+  selectedBucketId: string | null;
   refreshIntervalSeconds: number;
   onMailboxChange: (id: string | null) => void;
+  onBucketOpen: (id: string) => void;
   onFolderChange: (folder: FolderKey) => void;
   onSettingsOpen: (view: SettingsViewKey) => void;
   onLock: () => void;
@@ -1617,6 +1662,34 @@ function Sidebar({
           );
         })}
       </nav>
+
+      <div className="sidebar-section">
+        <div className="section-title">
+          <Server size={14} />
+          Buckets
+        </div>
+        {buckets.length > 0 ? (
+          buckets.map((bucket) => (
+            <button
+              className={view === "buckets" && selectedBucketId === bucket.id ? "settings-link active" : "settings-link"}
+              key={bucket.id}
+              onClick={() => onBucketOpen(bucket.id)}
+              disabled={!bucket.configured}
+              title={bucket.description}
+            >
+              <Server size={16} />
+              <span>{bucket.name}</span>
+              <b>{bucket.configured ? "R2" : "Off"}</b>
+            </button>
+          ))
+        ) : (
+          <button className="settings-link" disabled>
+            <Server size={16} />
+            <span>No buckets</span>
+            <b>Off</b>
+          </button>
+        )}
+      </div>
 
       <div className="sidebar-section">
         <div className="section-title">
@@ -2740,6 +2813,372 @@ function OtherSettingsView({
   );
 }
 
+function BucketsView({
+  api,
+  buckets,
+  activeBucketId,
+  onBucketChange,
+  onNotice
+}: {
+  api: ApiClient | null;
+  buckets: BucketRow[];
+  activeBucketId: string | null;
+  onBucketChange: (bucketId: string | null) => void;
+  onNotice: (message: string | null) => void;
+}) {
+  const activeBucket = buckets.find((bucket) => bucket.id === activeBucketId) ?? buckets[0] ?? null;
+  const [prefix, setPrefix] = useState("");
+  const [folders, setFolders] = useState<BucketFolderRow[]>([]);
+  const [objects, setObjects] = useState<BucketObjectRow[]>([]);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const selectedObject = objects.find((object) => object.key === selectedKey) ?? null;
+
+  async function loadObjects(nextPrefix = prefix, nextCursor: string | null = null, append = false) {
+    if (!api || !activeBucket) return;
+    setLoading(true);
+    try {
+      const data = await api.listBucketObjects(activeBucket.id, nextPrefix, nextCursor);
+      const nextObjects = append ? [...objects, ...data.objects] : data.objects;
+      setFolders(data.folders);
+      setObjects(nextObjects);
+      setCursor(data.cursor);
+      setSelectedKey((current) => (current && nextObjects.some((object) => object.key === current) ? current : nextObjects[0]?.key ?? null));
+      onNotice(null);
+    } catch (error) {
+      onNotice(readError(error));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!activeBucketId && buckets[0]) {
+      onBucketChange(buckets[0].id);
+    }
+  }, [activeBucketId, buckets, onBucketChange]);
+
+  useEffect(() => {
+    setPrefix("");
+    setSelectedKey(null);
+  }, [activeBucket?.id]);
+
+  useEffect(() => {
+    void loadObjects(prefix, null, false);
+  }, [api, activeBucket?.id, prefix]);
+
+  async function uploadFiles(files: FileList | null) {
+    if (!files || files.length === 0 || !api || !activeBucket) return;
+    setUploading(true);
+    try {
+      for (const file of Array.from(files)) {
+        await api.uploadBucketObject(activeBucket.id, buildR2UploadKey(prefix, file.name), file);
+      }
+      await loadObjects(prefix, null, false);
+      onNotice(`Uploaded ${files.length} object${files.length === 1 ? "" : "s"}`);
+    } catch (error) {
+      onNotice(readError(error));
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function deleteObject(object: BucketObjectRow) {
+    if (!api || !activeBucket) return;
+    const confirmed = window.confirm(`Delete ${object.key}?`);
+    if (!confirmed) return;
+
+    setLoading(true);
+    try {
+      await api.deleteBucketObject(activeBucket.id, object.key);
+      setSelectedKey(null);
+      await loadObjects(prefix, null, false);
+      onNotice("R2 object deleted");
+    } catch (error) {
+      onNotice(readError(error));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (buckets.length === 0) {
+    return (
+      <section className="settings-shell empty-detail">
+        <Server size={28} />
+        <span>No R2 bucket binding</span>
+      </section>
+    );
+  }
+
+  return (
+    <section className="bucket-shell">
+      <div className="bucket-toolbar">
+        <div className="bucket-current">
+          <span>Bucket</span>
+          <strong>{activeBucket?.name ?? "MAIL_BUCKET"}</strong>
+          <small>{activeBucket?.binding ?? "MAIL_BUCKET"} binding</small>
+        </div>
+        <div className="bucket-actions">
+          <label className={uploading ? "button primary file-button is-loading" : "button primary file-button"}>
+            {uploading ? <Loader2 size={15} /> : <FileUp size={15} />}
+            <span>{uploading ? "Uploading" : "Upload"}</span>
+            <input
+              type="file"
+              multiple
+              disabled={uploading || loading || !activeBucket?.writable}
+              onChange={(event) => {
+                void uploadFiles(event.target.files);
+                event.currentTarget.value = "";
+              }}
+            />
+          </label>
+          <button className="button ghost" type="button" onClick={() => void loadObjects(prefix, null, false)} disabled={loading}>
+            <RefreshCw size={15} />
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      <div className="bucket-pathbar">
+        <button className={!prefix ? "button mini active" : "button mini"} type="button" onClick={() => setPrefix("")}>
+          /
+        </button>
+        {prefixParts(prefix).map((part) => (
+          <button className="button mini" key={part.prefix} type="button" onClick={() => setPrefix(part.prefix)}>
+            {part.name}
+          </button>
+        ))}
+      </div>
+
+      <div className="bucket-layout">
+        <section className="bucket-panel folder-panel">
+          <header>
+            <div>
+              <span>Folders</span>
+              <strong>{prefix || "/"}</strong>
+            </div>
+            <FolderGit2 size={17} />
+          </header>
+          <div className="bucket-list">
+            {prefix ? (
+              <button className="bucket-row folder" type="button" onClick={() => setPrefix(parentR2Prefix(prefix))}>
+                <ChevronRight size={14} />
+                <span>..</span>
+                <b>up</b>
+              </button>
+            ) : null}
+            {folders.map((folder) => (
+              <button className="bucket-row folder" key={folder.key} type="button" onClick={() => setPrefix(folder.key)}>
+                <ChevronRight size={14} />
+                <span>{folder.name}</span>
+                <b>folder</b>
+              </button>
+            ))}
+            {!loading && folders.length === 0 && !prefix ? <div className="empty-state">No folders</div> : null}
+          </div>
+        </section>
+
+        <section className="bucket-panel object-panel">
+          <header>
+            <div>
+              <span>Objects</span>
+              <strong>{objects.length} files</strong>
+            </div>
+            <FileText size={17} />
+          </header>
+          <div className="bucket-list object-list">
+            {loading && objects.length === 0 ? (
+              <div className="preview-loading compact">
+                <Loader2 size={18} />
+                <span>Loading objects</span>
+              </div>
+            ) : null}
+            {objects.map((object) => (
+              <button
+                className={selectedKey === object.key ? "bucket-row object active" : "bucket-row object"}
+                key={object.key}
+                type="button"
+                onClick={() => setSelectedKey(object.key)}
+              >
+                <FileText size={14} />
+                <span>{object.name}</span>
+                <b>{formatBytes(object.size)}</b>
+                <small>{object.key}</small>
+              </button>
+            ))}
+            {!loading && objects.length === 0 ? <div className="empty-state">No objects</div> : null}
+            {cursor ? (
+              <button className="button ghost wide" type="button" onClick={() => void loadObjects(prefix, cursor, true)} disabled={loading}>
+                Load more
+              </button>
+            ) : null}
+          </div>
+        </section>
+
+        <BucketObjectPreview
+          api={api}
+          bucket={activeBucket}
+          object={selectedObject}
+          onDelete={deleteObject}
+          onNotice={onNotice}
+        />
+      </div>
+    </section>
+  );
+}
+
+function BucketObjectPreview({
+  api,
+  bucket,
+  object,
+  onDelete,
+  onNotice
+}: {
+  api: ApiClient | null;
+  bucket: BucketRow | null;
+  object: BucketObjectRow | null;
+  onDelete: (object: BucketObjectRow) => Promise<void>;
+  onNotice: (message: string | null) => void;
+}) {
+  const [state, setState] = useState<{
+    loading: boolean;
+    downloading: boolean;
+    error: string | null;
+    kind: AttachmentPreviewKind;
+    url: string | null;
+    text: string | null;
+    blob: Blob | null;
+  }>({ loading: false, downloading: false, error: null, kind: "download", url: null, text: null, blob: null });
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl: string | null = null;
+
+    async function loadPreview() {
+      if (!api || !bucket || !object) {
+        setState({ loading: false, downloading: false, error: null, kind: "download", url: null, text: null, blob: null });
+        return;
+      }
+
+      if (object.size > MAX_BUCKET_INLINE_PREVIEW_BYTES) {
+        setState({ loading: false, downloading: false, error: null, kind: "download", url: null, text: null, blob: null });
+        return;
+      }
+
+      setState({ loading: true, downloading: false, error: null, kind: "download", url: null, text: null, blob: null });
+      try {
+        const blob = await api.downloadBucketObject(bucket.id, object.key);
+        objectUrl = URL.createObjectURL(blob);
+        const kind = detectObjectPreviewKind(object.name, object.contentType || blob.type, blob);
+        const text = kind === "text" ? await blob.text() : null;
+        if (active) {
+          setState({ loading: false, downloading: false, error: null, kind, url: objectUrl, text, blob });
+        }
+      } catch (error) {
+        if (active) {
+          const message = readError(error);
+          setState({ loading: false, downloading: false, error: message, kind: "download", url: null, text: null, blob: null });
+          onNotice(message);
+        }
+      }
+    }
+
+    void loadPreview();
+
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [api, bucket, object, onNotice]);
+
+  async function downloadObject() {
+    if (!api || !bucket || !object) return;
+    if (state.blob) {
+      saveBlob(state.blob, object.name);
+      return;
+    }
+
+    setState((current) => ({ ...current, downloading: true }));
+    try {
+      const blob = await api.downloadBucketObject(bucket.id, object.key);
+      saveBlob(blob, object.name);
+    } catch (error) {
+      onNotice(readError(error));
+    } finally {
+      setState((current) => ({ ...current, downloading: false }));
+    }
+  }
+
+  return (
+    <section className="bucket-panel preview-panel">
+      <header>
+        <div>
+          <span>Preview</span>
+          <strong>{object?.name ?? "Select object"}</strong>
+          {object ? (
+            <small>
+              {object.contentType} · {formatBytes(object.size)}
+            </small>
+          ) : null}
+        </div>
+        <div className="preview-actions">
+          <button
+            className="button ghost"
+            type="button"
+            disabled={!object || !api || !bucket || state.downloading}
+            onClick={() => void downloadObject()}
+          >
+            {state.downloading ? <Loader2 size={15} /> : <Download size={15} />}
+            {state.downloading ? "Downloading" : "Download"}
+          </button>
+          <button className="button danger" type="button" disabled={!object} onClick={() => object && void onDelete(object)}>
+            <Trash2 size={15} />
+            Delete
+          </button>
+        </div>
+      </header>
+
+      <div className="bucket-preview-body">
+        {!object ? (
+          <div className="preview-fallback">
+            <Server size={30} />
+            <strong>Select an object</strong>
+            <span>Preview, download, or delete R2 files here.</span>
+          </div>
+        ) : state.loading ? (
+          <div className="preview-loading">
+            <Loader2 size={22} />
+            <span>Loading preview</span>
+          </div>
+        ) : state.error ? (
+          <div className="preview-fallback warn">
+            <AlertTriangle size={24} />
+            <strong>{state.error}</strong>
+          </div>
+        ) : state.kind === "image" && state.url ? (
+          <img className="image-preview" src={state.url} alt={object.name} />
+        ) : state.kind === "pdf" && state.url ? (
+          <iframe className="pdf-preview" src={state.url} title={object.name} />
+        ) : state.kind === "text" ? (
+          <pre className="text-preview">{state.text}</pre>
+        ) : (
+          <div className="preview-fallback">
+            <FileText size={28} />
+            <strong>{object.name}</strong>
+            <span>
+              {object.size > MAX_BUCKET_INLINE_PREVIEW_BYTES
+                ? `Preview skipped over ${formatBytes(MAX_BUCKET_INLINE_PREVIEW_BYTES)}`
+                : object.contentType || "No inline preview"}
+            </span>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function ThreadList({
   threads,
   activeThreadId,
@@ -3646,8 +4085,12 @@ function saveBlob(blob: Blob, filename: string): void {
 }
 
 function detectAttachmentPreviewKind(attachment: AttachmentRow, blob: Blob): AttachmentPreviewKind {
-  const filename = attachment.filename.toLowerCase();
-  const contentType = (attachment.content_type || blob.type || "").toLowerCase();
+  return detectObjectPreviewKind(attachment.filename, attachment.content_type || blob.type, blob);
+}
+
+function detectObjectPreviewKind(filenameInput: string, contentTypeInput: string, blob: Blob): AttachmentPreviewKind {
+  const filename = filenameInput.toLowerCase();
+  const contentType = (contentTypeInput || blob.type || "").toLowerCase();
   const textExtensions = [".txt", ".md", ".csv", ".json", ".log", ".xml", ".html", ".css", ".js", ".ts", ".tsx", ".yml", ".yaml"];
 
   if (contentType.startsWith("image/")) return "image";
@@ -3657,6 +4100,24 @@ function detectAttachmentPreviewKind(attachment: AttachmentRow, blob: Blob): Att
   }
 
   return "download";
+}
+
+function buildR2UploadKey(prefix: string, filename: string): string {
+  const safeName = filename.replace(/[\\\u0000-\u001f\u007f]/g, "_").replace(/^\/+/, "").trim() || "upload";
+  return `${prefix}${safeName}`.replace(/^\/+/, "");
+}
+
+function prefixParts(prefix: string): { name: string; prefix: string }[] {
+  const parts = prefix.split("/").filter(Boolean);
+  return parts.map((name, index) => ({
+    name,
+    prefix: `${parts.slice(0, index + 1).join("/")}/`
+  }));
+}
+
+function parentR2Prefix(prefix: string): string {
+  const parts = prefix.split("/").filter(Boolean);
+  return parts.length <= 1 ? "" : `${parts.slice(0, -1).join("/")}/`;
 }
 
 function formatBytes(value: number): string {

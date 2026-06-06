@@ -951,6 +951,204 @@ button:hover:not(:disabled) {
   min-height: 0;
 }
 
+.bucket-shell {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 10px;
+  height: calc(100vh - 120px);
+  min-height: 0;
+  margin: 10px 14px 18px;
+}
+
+.bucket-toolbar,
+.bucket-pathbar,
+.bucket-panel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.bucket-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 54px;
+  padding: 8px 10px;
+}
+
+.bucket-current span,
+.bucket-current small {
+  display: block;
+  color: var(--muted);
+  font: 11px/1.2 var(--mono);
+  text-transform: uppercase;
+}
+
+.bucket-current strong {
+  display: block;
+  margin: 3px 0;
+  font-size: 15px;
+}
+
+.bucket-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.file-button {
+  position: relative;
+  overflow: hidden;
+}
+
+.file-button input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.file-button.is-loading svg {
+  animation: spin 0.9s linear infinite;
+}
+
+.bucket-pathbar {
+  display: flex;
+  gap: 6px;
+  min-height: 40px;
+  overflow: auto;
+  padding: 6px;
+  box-shadow: none;
+}
+
+.bucket-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 300px) minmax(320px, 420px) minmax(420px, 1fr);
+  gap: 12px;
+  min-height: 0;
+}
+
+.bucket-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.bucket-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 56px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-alt);
+}
+
+.bucket-panel header div {
+  min-width: 0;
+}
+
+.bucket-panel header span,
+.bucket-panel header small {
+  display: block;
+  overflow: hidden;
+  color: var(--muted);
+  font: 11px/1.2 var(--mono);
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.bucket-panel header strong {
+  display: block;
+  margin: 4px 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bucket-list {
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+}
+
+.bucket-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--control);
+  color: var(--text);
+  text-align: left;
+}
+
+.bucket-row span,
+.bucket-row small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bucket-row b {
+  color: var(--muted);
+  font: 11px/1 var(--mono);
+}
+
+.bucket-row small {
+  grid-column: 2 / -1;
+  color: var(--muted);
+  font: 11px/1.2 var(--mono);
+}
+
+.bucket-row.active {
+  border-color: var(--selected-line);
+  background: var(--selected);
+  color: var(--accent-strong);
+}
+
+.bucket-row:hover {
+  border-color: var(--hover-line);
+  background: var(--hover-bg);
+  color: var(--hover-text);
+}
+
+.bucket-row:hover b,
+.bucket-row:hover small {
+  color: var(--hover-text);
+}
+
+.bucket-preview-body {
+  display: grid;
+  min-height: 0;
+  padding: 10px;
+  background: var(--panel-alt);
+}
+
+.bucket-preview-body .preview-loading,
+.bucket-preview-body .preview-fallback {
+  min-height: 100%;
+}
+
+.preview-loading.compact {
+  min-height: 140px;
+}
+
 .rules-domain-drawer {
   display: grid;
   gap: 8px;
@@ -2527,7 +2725,8 @@ button:hover:not(:disabled) {
   .settings-grid,
   .signature-grid,
   .external-grid,
-  .other-settings-grid {
+  .other-settings-grid,
+  .bucket-layout {
     grid-template-columns: 1fr;
     height: auto;
   }
@@ -2538,6 +2737,16 @@ button:hover:not(:disabled) {
 
   .settings-shell {
     height: auto;
+  }
+
+  .bucket-shell {
+    height: auto;
+  }
+
+  .bucket-toolbar,
+  .bucket-actions {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .rules-table-card {

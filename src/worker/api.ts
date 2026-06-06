@@ -169,6 +169,7 @@ export async function handleApi(
         contacts,
         signatures,
         externalAccounts,
+        buckets: listAvailableBuckets(env),
         stats,
         threads
       });
@@ -426,6 +427,86 @@ export async function handleApi(
       return new Response(object.body, { headers });
     }
 
+    if (url.pathname === "/api/buckets") {
+      if (request.method !== "GET") return methodNotAllowed();
+      return json({ ok: true, buckets: listAvailableBuckets(env) });
+    }
+
+    const bucketObjectsMatch = url.pathname.match(/^\/api\/buckets\/([^/]+)\/objects$/);
+    if (bucketObjectsMatch) {
+      if (request.method !== "GET") return methodNotAllowed();
+      const bucket = getBucketBinding(env, bucketObjectsMatch[1]);
+      const prefix = readR2Prefix(url);
+      const cursor = url.searchParams.get("cursor")?.trim() || undefined;
+      const result = await bucket.bucket.list({
+        cursor,
+        delimiter: "/",
+        include: ["httpMetadata"],
+        limit: 200,
+        prefix
+      });
+
+      return json({
+        ok: true,
+        bucket: bucket.info,
+        prefix,
+        folders: result.delimitedPrefixes.map((folderPrefix) => ({
+          key: folderPrefix,
+          name: displayR2FolderName(folderPrefix, prefix)
+        })),
+        objects: result.objects.map(serializeR2Object).filter((object) => object.key !== prefix),
+        cursor: result.truncated ? result.cursor : null,
+        truncated: result.truncated
+      });
+    }
+
+    const bucketObjectMatch = url.pathname.match(/^\/api\/buckets\/([^/]+)\/object$/);
+    if (bucketObjectMatch) {
+      const bucket = getBucketBinding(env, bucketObjectMatch[1]);
+      const key = readR2Key(url);
+
+      if (request.method === "GET") {
+        const object = await bucket.bucket.get(key);
+        if (!object) {
+          throw new ApiError(404, "bucket_object_not_found", "R2 object not found");
+        }
+
+        const headers = new Headers();
+        object.writeHttpMetadata(headers);
+        headers.set("content-type", headers.get("content-type") || "application/octet-stream");
+        headers.set("content-disposition", `attachment; filename="${safeHeaderFilename(filenameFromR2Key(key))}"`);
+        headers.set("cache-control", "private, max-age=60");
+        headers.set("etag", object.httpEtag);
+        if (object.size) {
+          headers.set("content-length", String(object.size));
+        }
+        return new Response(object.body, { headers });
+      }
+
+      if (request.method === "PUT") {
+        if (!request.body) {
+          throw new ApiError(400, "empty_upload", "Upload body is empty");
+        }
+        const contentType = request.headers.get("content-type") || "application/octet-stream";
+        const uploaded = await bucket.bucket.put(key, request.body, {
+          httpMetadata: {
+            contentDisposition: `attachment; filename="${safeHeaderFilename(filenameFromR2Key(key))}"`,
+            contentType
+          }
+        });
+        ctx.waitUntil(recordAudit(env, "bucket.object_uploaded", key, { bucket: bucket.info.id, size: uploaded.size }));
+        return json({ ok: true, object: serializeR2Object(uploaded) }, { status: 201 });
+      }
+
+      if (request.method === "DELETE") {
+        await bucket.bucket.delete(key);
+        ctx.waitUntil(recordAudit(env, "bucket.object_deleted", key, { bucket: bucket.info.id }));
+        return json({ ok: true });
+      }
+
+      return methodNotAllowed();
+    }
+
     const replyMatch = url.pathname.match(/^\/api\/threads\/([^/]+)\/reply$/);
     if (replyMatch) {
       if (request.method !== "POST") return methodNotAllowed();
@@ -506,6 +587,83 @@ function requireEmailBinding(env: RuntimeEnv): void {
 function requireMailSendBindings(env: RuntimeEnv): void {
   requireMailBucketBinding(env);
   requireEmailBinding(env);
+}
+
+type BucketInfo = {
+  id: string;
+  name: string;
+  binding: "MAIL_BUCKET";
+  configured: boolean;
+  writable: boolean;
+  description: string;
+};
+
+type BucketBinding = {
+  info: BucketInfo;
+  bucket: R2Bucket;
+};
+
+function listAvailableBuckets(env: RuntimeEnv): BucketInfo[] {
+  const configured = Boolean(env.MAIL_BUCKET);
+  return [
+    {
+      id: "mail",
+      name: runtimeBucketName(env),
+      binding: "MAIL_BUCKET",
+      configured,
+      writable: configured,
+      description: "Emailfox raw messages, attachments, and manual files"
+    }
+  ];
+}
+
+function getBucketBinding(env: RuntimeEnv, bucketId: string): BucketBinding {
+  if (bucketId !== "mail") {
+    throw new ApiError(404, "bucket_not_found", "Bucket is not configured for this Worker");
+  }
+  requireMailBucketBinding(env);
+  const info = listAvailableBuckets(env)[0];
+  return { info, bucket: env.MAIL_BUCKET };
+}
+
+function runtimeBucketName(env: RuntimeEnv): string {
+  return env.R2_BUCKET_NAME?.trim() || "MAIL_BUCKET";
+}
+
+function readR2Prefix(url: URL): string {
+  const prefix = url.searchParams.get("prefix") ?? "";
+  if (prefix.length > 1024 || /[\u0000-\u001f\u007f]/.test(prefix) || prefix.startsWith("/")) {
+    throw new ApiError(400, "invalid_prefix", "R2 prefix is invalid");
+  }
+  return prefix;
+}
+
+function readR2Key(url: URL): string {
+  const key = url.searchParams.get("key") ?? "";
+  if (!key || key.length > 1024 || key.startsWith("/") || key.endsWith("/") || /[\u0000-\u001f\u007f]/.test(key)) {
+    throw new ApiError(400, "invalid_key", "R2 object key is invalid");
+  }
+  return key;
+}
+
+function serializeR2Object(object: R2Object) {
+  return {
+    key: object.key,
+    name: filenameFromR2Key(object.key),
+    size: object.size,
+    uploaded: object.uploaded.toISOString(),
+    etag: object.etag,
+    contentType: object.httpMetadata?.contentType ?? "application/octet-stream"
+  };
+}
+
+function displayR2FolderName(folderPrefix: string, parentPrefix: string): string {
+  const relative = folderPrefix.slice(parentPrefix.length).replace(/\/$/, "");
+  return relative.split("/").filter(Boolean).pop() || folderPrefix.replace(/\/$/, "") || "/";
+}
+
+function filenameFromR2Key(key: string): string {
+  return key.split("/").filter(Boolean).pop() || "object";
 }
 
 async function seedDevelopmentData(env: RuntimeEnv): Promise<number> {

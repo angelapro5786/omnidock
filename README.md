@@ -13,6 +13,7 @@ It gives you a compact Linux-style webmail/support inbox for domains in your own
 - Import contacts manually or from CSV/TXT/VCF files into D1
 - Manage mailbox-specific signatures
 - Send outbound attachments while storing copies in R2
+- Browse, preview, upload, download, and delete files in the configured R2 bucket
 - Choose between five UI palettes: Linux, Ubuntu, Fedora, Plasma, Graphite
 
 Emailfox is not an IMAP/POP3 server and does not replace a full mailbox provider. It is best for private support inboxes, project inboxes, catch-all workflows, and lightweight multi-domain email operations that already live on Cloudflare.
@@ -162,6 +163,7 @@ Cloudflare does not create empty rows from the repository. Add one row for each 
 | Secret | `ADMIN_PASSWORD` | First admin password, at least 12 characters | Required before first setup |
 | Plaintext variable | `PRIMARY_DOMAIN` | Your first email domain, for example `example.com` | Required before first setup |
 | Secret | `CLOUDFLARE_API_TOKEN` | Cloudflare API token | Required before first setup |
+| Plaintext variable | `R2_BUCKET_NAME` | R2 bucket display name, for example `emailfox-mail` | Optional, shown in the Buckets sidebar |
 | Plaintext variable | `WORKER_SCRIPT_NAME` | Deployed Worker script name, for example `emailfox` | Add when you want Emailfox to create Email Routing rules |
 | Plaintext variable | `MANAGEMENT_HOST` | Custom dashboard hostname, for example `mail.example.com` | Add only for a custom dashboard hostname |
 | Plaintext variable | `PASSWORD_RESET_FROM` | Verified reset sender, for example `no-reply@example.com` | Add only for a custom verified reset sender |
@@ -177,7 +179,7 @@ D1 and R2 are not secrets. Add them as Cloudflare bindings/resources:
 | `MAIL_BUCKET` | R2 bucket |
 | `EMAIL` | Cloudflare Email Sending binding |
 
-Bindings cannot be replaced by Worker secrets. The running Worker must receive `DB` as a D1 binding and `MAIL_BUCKET` as an R2 binding.
+Bindings cannot be replaced by Worker secrets. The running Worker must receive `DB` as a D1 binding and `MAIL_BUCKET` as an R2 binding. `R2_BUCKET_NAME` is only a display variable for the Buckets UI; it does not grant access by itself.
 
 The deploy script runs:
 

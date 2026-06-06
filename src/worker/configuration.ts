@@ -43,6 +43,15 @@ export function runtimeRequirements(env: RuntimeEnv, setupRequired: boolean): Ru
       message: env.MAIL_BUCKET ? "R2 bucket binding MAIL_BUCKET is connected." : "Add an R2 bucket binding named MAIL_BUCKET."
     },
     {
+      kind: "variable",
+      name: "R2_BUCKET_NAME",
+      required: false,
+      configured: Boolean(env.R2_BUCKET_NAME),
+      message: env.R2_BUCKET_NAME
+        ? "R2 bucket display name variable is configured."
+        : "Optional: add the R2 bucket display name as R2_BUCKET_NAME."
+    },
+    {
       kind: "binding",
       name: "EMAIL",
       required: true,

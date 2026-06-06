@@ -119,6 +119,29 @@ export type ExternalAccountRow = {
   updated_at: string;
 };
 
+export type BucketRow = {
+  id: string;
+  name: string;
+  binding: string;
+  configured: boolean;
+  writable: boolean;
+  description: string;
+};
+
+export type BucketFolderRow = {
+  key: string;
+  name: string;
+};
+
+export type BucketObjectRow = {
+  key: string;
+  name: string;
+  size: number;
+  uploaded: string;
+  etag: string;
+  contentType: string;
+};
+
 export type BootstrapPayload = {
   ok: true;
   managementHost: string;
@@ -127,8 +150,19 @@ export type BootstrapPayload = {
   contacts: ContactRow[];
   signatures: MailboxSignatureRow[];
   externalAccounts: ExternalAccountRow[];
+  buckets: BucketRow[];
   stats: Record<string, number>;
   threads: ThreadRow[];
+};
+
+export type BucketObjectsPayload = {
+  ok: true;
+  bucket: BucketRow;
+  prefix: string;
+  folders: BucketFolderRow[];
+  objects: BucketObjectRow[];
+  cursor: string | null;
+  truncated: boolean;
 };
 
 export type SetupStatusPayload = {

@@ -10,6 +10,7 @@ export type RuntimeEnv = Env & {
   MANAGEMENT_HOST?: string;
   PRIMARY_DOMAIN?: string;
   PASSWORD_RESET_FROM?: string;
+  R2_BUCKET_NAME?: string;
   WORKER_SCRIPT_NAME?: string;
 };
 
