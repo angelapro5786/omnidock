@@ -359,6 +359,11 @@ export async function getDomainById(env: RuntimeEnv, id: string): Promise<Domain
   return row ?? null;
 }
 
+export async function getDefaultDomain(env: RuntimeEnv): Promise<DomainRow | null> {
+  const row = await env.DB.prepare("SELECT * FROM domains WHERE is_default = 1 LIMIT 1").first<DomainRow>();
+  return row ?? null;
+}
+
 export async function setDefaultDomain(env: RuntimeEnv, id: string): Promise<DomainRow> {
   const domain = await getDomainById(env, id);
   if (!domain) {
