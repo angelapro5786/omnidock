@@ -1,35 +1,32 @@
 import fs from "node:fs";
 
-const SKIP_FLAG = "EMAILFOX_SKIP_CONFIG_CHECK";
+const STRICT_FLAG = "EMAILFOX_STRICT_CONFIG_CHECK";
 const PLACEHOLDER_D1_ID = "00000000-0000-0000-0000-000000000000";
 
-if (process.env[SKIP_FLAG] === "1") {
-  process.exit(0);
-}
-
 const config = readJsonc("wrangler.jsonc");
-const failures = [];
+const warnings = [];
 
 const d1 = Array.isArray(config.d1_databases) ? config.d1_databases.find((item) => item.binding === "DB") : null;
-if (!d1?.database_name) {
-  failures.push("Set d1_databases binding DB with a database_name so Cloudflare can create or reuse D1.");
-}
-if (!d1?.database_id || d1.database_id === PLACEHOLDER_D1_ID) {
-  failures.push("Select or create the D1 database during deploy so DB.database_id is not the placeholder UUID.");
+if (d1 && (!d1.database_id || d1.database_id === PLACEHOLDER_D1_ID)) {
+  warnings.push("DB.database_id is a placeholder. Remove the binding from the public template or replace it in your private fork.");
 }
 
 const r2 = Array.isArray(config.r2_buckets) ? config.r2_buckets.find((item) => item.binding === "MAIL_BUCKET") : null;
-if (!r2?.bucket_name) {
-  failures.push("Set r2_buckets binding MAIL_BUCKET with a bucket_name so Cloudflare can create or reuse R2.");
+if (r2 && !r2.bucket_name) {
+  warnings.push("MAIL_BUCKET has no bucket_name. Remove the binding from the public template or replace it in your private fork.");
 }
 
-if (failures.length > 0) {
-  console.error("Emailfox deploy configuration is incomplete:");
-  for (const failure of failures) {
-    console.error(`- ${failure}`);
+if (warnings.length > 0) {
+  const strict = process.env[STRICT_FLAG] === "1";
+  const output = strict ? console.error : console.warn;
+  output("Emailfox deploy configuration warning:");
+  for (const warning of warnings) {
+    output(`- ${warning}`);
   }
-  console.error(`Set ${SKIP_FLAG}=1 only when developing the public template itself.`);
-  process.exit(1);
+  output("The Worker can still deploy; the app will show missing runtime bindings/secrets on first open.");
+  if (strict) {
+    process.exit(1);
+  }
 }
 
 function readJsonc(path) {

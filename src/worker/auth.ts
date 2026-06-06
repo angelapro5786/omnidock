@@ -1,6 +1,7 @@
 import { ApiError, RuntimeEnv } from "./http";
 import { ensureDatabaseSchema } from "./schema";
 import { domainFromEmail, getDefaultDomain, normalizeDomain } from "./db";
+import { configuredAdminPassword } from "./configuration";
 
 const encoder = new TextEncoder();
 const PASSWORD_ITERATIONS = 100_000;
@@ -39,6 +40,13 @@ export async function requireAdmin(request: Request, env: RuntimeEnv): Promise<v
 }
 
 export async function getSetupStatus(env: RuntimeEnv): Promise<SetupStatus> {
+  if (!env.DB) {
+    return {
+      setupRequired: true,
+      resetAvailable: false
+    };
+  }
+
   await ensureDatabaseSchema(env);
   const record = await getAdminAuth(env);
 
@@ -50,7 +58,7 @@ export async function getSetupStatus(env: RuntimeEnv): Promise<SetupStatus> {
 
 export async function createAdminAccount(
   env: RuntimeEnv,
-  input: { name: string; email: string; recoveryEmail: string; primaryDomain: string; password: string }
+  input: { name: string; email: string; recoveryEmail: string; primaryDomain: string; password?: string | null }
 ): Promise<void> {
   await ensureDatabaseSchema(env);
   const existing = await getAdminAuth(env);
@@ -62,10 +70,14 @@ export async function createAdminAccount(
   normalizeAdminEmail(input.email);
   const recoveryEmail = normalizeAdminEmail(input.recoveryEmail);
   validateExternalRecoveryEmail(recoveryEmail, input.primaryDomain);
-  validatePassword(input.password);
+  const password = input.password?.trim() || configuredAdminPassword(env);
+  if (!password) {
+    throw new ApiError(409, "admin_password_secret_missing", "Add ADMIN_PASSWORD as a Worker secret first.");
+  }
+  validatePassword(password);
 
   const salt = randomSalt();
-  const hash = await hashPassword(input.password, salt, PASSWORD_ITERATIONS);
+  const hash = await hashPassword(password, salt, PASSWORD_ITERATIONS);
 
   await env.DB.prepare(
     `INSERT INTO admin_auth (
@@ -170,7 +182,7 @@ function extractPassword(request: Request): string | null {
 }
 
 async function bootstrapPassword(env: RuntimeEnv, provided: string | null): Promise<void> {
-  const bootstrap = env.ADMIN_PASSWORD_BOOTSTRAP;
+  const bootstrap = configuredAdminPassword(env);
   if (!bootstrap) {
     throw new ApiError(409, "setup_required", "Create the first admin account before logging in.");
   }

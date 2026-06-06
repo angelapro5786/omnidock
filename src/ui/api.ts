@@ -24,7 +24,7 @@ export function createAdmin(input: {
   email: string;
   recoveryEmail: string;
   primaryDomain: string;
-  password: string;
+  password?: string | null;
 }): Promise<{ ok: true }> {
   return publicRequest("/api/setup", {
     method: "POST",

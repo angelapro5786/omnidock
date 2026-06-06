@@ -1,9 +1,13 @@
 export type RuntimeEnv = Env & {
+  ADMIN_PASSWORD?: string;
   ADMIN_PASSWORD_BOOTSTRAP?: string;
   CLOUDFLARE_ACCOUNT_ID?: string;
   CLOUDFLARE_API_TOKEN?: string;
+  DB: D1Database;
   DOMAINS?: string;
   ENABLE_DEV_SEED?: string;
+  EMAIL: SendEmail;
+  MAIL_BUCKET: R2Bucket;
   MANAGEMENT_HOST?: string;
   PRIMARY_DOMAIN?: string;
   PASSWORD_RESET_FROM?: string;

@@ -8,7 +8,8 @@
     "dev:worker": "wrangler dev",
     "build": "node tools/validate-deploy-config.mjs && npm run types && tsc --noEmit && vite build",
     "check": "npm run types && tsc --noEmit",
-    "deploy": "npm run build && npm run db:migrate:remote && wrangler deploy",
+    "deploy": "npm run build && wrangler deploy",
+    "deploy:with-migrations": "npm run build && npm run db:migrate:remote && wrangler deploy",
     "types": "wrangler types",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote"

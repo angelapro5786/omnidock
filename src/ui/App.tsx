@@ -64,7 +64,7 @@ const folders: { key: FolderKey; label: string; icon: typeof Inbox }[] = [
 type ViewKey = "mail" | "rules" | "contacts" | "signatures";
 type PaletteKey = "mint" | "ubuntu" | "fedora" | "plasma" | "graphite";
 type SettingsViewKey = Exclude<ViewKey, "mail">;
-type AuthViewKey = "checking" | "login" | "setup" | "reset-request" | "reset-confirm";
+type AuthViewKey = "checking" | "configuration" | "login" | "setup" | "reset-request" | "reset-confirm";
 
 const palettes: {
   key: PaletteKey;
@@ -134,7 +134,9 @@ export function App() {
       const status = await setupStatus();
       setSetup(status);
       setLoginError(null);
-      if (status.setupRequired) {
+      if (!status.configurationReady) {
+        setAuthView("configuration");
+      } else if (status.setupRequired) {
         setAuthView("setup");
       } else if (resetToken) {
         setAuthView("reset-confirm");
@@ -324,7 +326,7 @@ export function App() {
     setLoginError(null);
     setAuthNotice(null);
     clearPrivateState();
-    setAuthView(setup?.setupRequired ? "setup" : "login");
+    setAuthView(setup && !setup.configurationReady ? "configuration" : setup?.setupRequired ? "setup" : "login");
   }
 
   if (!password) {
@@ -346,7 +348,21 @@ export function App() {
           busy={busy}
           error={loginError}
           defaultDomain={setup?.primaryDomain ?? ""}
+          passwordFromSecret={Boolean(setup?.passwordFromSecret)}
           onSubmit={submitSetup}
+          palette={palette}
+          onPaletteChange={setPalette}
+        />
+      );
+    }
+
+    if (authView === "configuration") {
+      return (
+        <ConfigurationScreen
+          busy={busy}
+          error={loginError}
+          requirements={setup?.requirements ?? []}
+          onRetry={retrySetupStatus}
           palette={palette}
           onPaletteChange={setPalette}
         />

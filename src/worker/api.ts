@@ -6,6 +6,7 @@ import {
   requireAdmin,
   setAdminPassword
 } from "./auth";
+import { configuredAdminPassword, configuredPrimaryDomain, runtimeRequirements } from "./configuration";
 import {
   createMailboxAndRoutingRule,
   enableCatchAllForDomain,
@@ -68,10 +69,15 @@ export async function handleApi(
 
     if (url.pathname === "/api/setup/status") {
       if (request.method !== "GET") return methodNotAllowed();
+      const setup = await getSetupStatus(env);
+      const requirements = runtimeRequirements(env, setup.setupRequired);
       return json({
         ok: true,
-        ...(await getSetupStatus(env)),
-        primaryDomain: configuredPrimaryDomain(env)
+        ...setup,
+        configurationReady: requirements.length === 0,
+        requirements,
+        primaryDomain: configuredPrimaryDomain(env),
+        passwordFromSecret: Boolean(configuredAdminPassword(env))
       });
     }
 
@@ -82,7 +88,20 @@ export async function handleApi(
       if (!setup.setupRequired) {
         throw new ApiError(409, "setup_complete", "Admin account is already configured");
       }
-      const primaryDomain = normalizeDomain(requiredString(body, "primaryDomain", { min: 3, max: 253 }));
+      const requirements = runtimeRequirements(env, setup.setupRequired);
+      if (requirements.length > 0) {
+        throw new ApiError(
+          409,
+          "configuration_required",
+          `Complete Cloudflare setup first: ${requirements.map((item) => item.name).join(", ")}`
+        );
+      }
+      const primaryDomainInput =
+        optionalString(body, "primaryDomain", { max: 253 }) ?? configuredPrimaryDomain(env);
+      if (!primaryDomainInput) {
+        throw new ApiError(409, "primary_domain_secret_missing", "Add PRIMARY_DOMAIN as a Worker secret first.");
+      }
+      const primaryDomain = normalizeDomain(primaryDomainInput);
       const recoveryEmail = requiredString(body, "recoveryEmail", { max: 320 });
       const domain = await upsertDomain(env, {
         domain: primaryDomain,
@@ -95,7 +114,7 @@ export async function handleApi(
         email: requiredString(body, "email", { max: 320 }),
         recoveryEmail,
         primaryDomain,
-        password: requiredString(body, "password", { min: 12, max: 256 })
+        password: optionalString(body, "password", { max: 256 })
       });
       ctx.waitUntil(recordAudit(env, "admin.created", "primary", { primaryDomain }));
       return json({ ok: true }, { status: 201 });
@@ -427,19 +446,6 @@ function publicOrigin(request: Request, env: RuntimeEnv): string {
     return `https://${managementHost}`;
   }
   return url.origin;
-}
-
-function configuredPrimaryDomain(env: RuntimeEnv): string | null {
-  const domain = (env.PRIMARY_DOMAIN ?? env.DOMAINS?.split(",")[0] ?? "").trim();
-  if (!domain || domain.toLowerCase() === "example.com") {
-    return null;
-  }
-
-  try {
-    return normalizeDomain(domain);
-  } catch {
-    return null;
-  }
 }
 
 function readContactList(

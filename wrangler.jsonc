@@ -12,24 +12,9 @@
     "binding": "ASSETS",
     "directory": "./dist/client"
   },
-  "d1_databases": [
-    {
-      "binding": "DB",
-      // Public template placeholder: Deploy to Cloudflare should replace this with a generated D1 id.
-      // Installed copies must keep the generated database_id for updates.
-      "database_name": "emailfox-db",
-      "database_id": "00000000-0000-0000-0000-000000000000",
-      "preview_database_id": "00000000-0000-0000-0000-000000000000",
-      "migrations_dir": "migrations"
-    }
-  ],
-  "r2_buckets": [
-    {
-      "binding": "MAIL_BUCKET",
-      "bucket_name": "emailfox-mail",
-      "preview_bucket_name": "emailfox-mail"
-    }
-  ],
+  // DB and MAIL_BUCKET are intentionally not hard-coded in the public template.
+  // Add them as Cloudflare dashboard bindings after deploy so forks do not carry
+  // placeholder or personal resource IDs.
   "send_email": [
     {
       "name": "EMAIL"

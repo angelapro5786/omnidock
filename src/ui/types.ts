@@ -110,7 +110,16 @@ export type SetupStatusPayload = {
   ok: true;
   setupRequired: boolean;
   resetAvailable: boolean;
+  configurationReady: boolean;
+  requirements: RuntimeRequirement[];
   primaryDomain: string | null;
+  passwordFromSecret: boolean;
+};
+
+export type RuntimeRequirement = {
+  kind: "binding" | "secret";
+  name: string;
+  message: string;
 };
 
 export type ThreadPayload = {
