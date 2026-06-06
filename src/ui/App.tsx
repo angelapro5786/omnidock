@@ -251,16 +251,23 @@ export function App() {
     setPassword(draftPassword);
   }
 
-  async function submitSetup(input: { name: string; email: string; password: string }) {
+  async function submitSetup(input: {
+    name: string;
+    email: string;
+    recoveryEmail: string | null;
+    primaryDomain: string;
+    password: string;
+  }) {
     setBusy(true);
     try {
       await createAdmin(input);
-      sessionStorage.setItem(PASSWORD_KEY, input.password);
-      setPassword(input.password);
+      sessionStorage.removeItem(PASSWORD_KEY);
+      setPassword("");
       setDraftPassword("");
-      setAuthNotice(null);
+      setAuthNotice("Setup complete. Log in with your password.");
       setLoginError(null);
       await loadSetupStatus();
+      setAuthView("login");
     } catch (error) {
       setLoginError(readError(error));
     } finally {
@@ -338,6 +345,7 @@ export function App() {
         <SetupScreen
           busy={busy}
           error={loginError}
+          defaultDomain={setup?.primaryDomain ?? ""}
           onSubmit={submitSetup}
           palette={palette}
           onPaletteChange={setPalette}
@@ -630,19 +638,29 @@ function LoginScreen({
 
 function SetupScreen({
   busy,
+  defaultDomain,
   error,
   onSubmit,
   palette,
   onPaletteChange
 }: {
   busy: boolean;
+  defaultDomain: string;
   error: string | null;
-  onSubmit: (input: { name: string; email: string; password: string }) => Promise<void>;
+  onSubmit: (input: {
+    name: string;
+    email: string;
+    recoveryEmail: string | null;
+    primaryDomain: string;
+    password: string;
+  }) => Promise<void>;
   palette: PaletteKey;
   onPaletteChange: (palette: PaletteKey) => void;
 }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [recoveryEmail, setRecoveryEmail] = useState("");
+  const [primaryDomain, setPrimaryDomain] = useState(defaultDomain);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
@@ -653,8 +671,18 @@ function SetupScreen({
       setLocalError("Passwords do not match");
       return;
     }
+    if (!primaryDomain.trim()) {
+      setLocalError("Primary domain is required");
+      return;
+    }
     setLocalError(null);
-    await onSubmit({ name, email, password });
+    await onSubmit({
+      name,
+      email,
+      recoveryEmail: recoveryEmail.trim() || null,
+      primaryDomain,
+      password
+    });
   }
 
   return (
@@ -696,6 +724,28 @@ function SetupScreen({
           type="email"
           value={email}
           onChange={(event) => setEmail(event.target.value)}
+          required
+        />
+        <label className="field-label" htmlFor="setup-recovery-email">
+          Recovery email
+        </label>
+        <input
+          id="setup-recovery-email"
+          className="text-input"
+          type="email"
+          value={recoveryEmail}
+          onChange={(event) => setRecoveryEmail(event.target.value)}
+          placeholder={email || "admin@example.com"}
+        />
+        <label className="field-label" htmlFor="setup-primary-domain">
+          Primary domain
+        </label>
+        <input
+          id="setup-primary-domain"
+          className="text-input"
+          value={primaryDomain}
+          onChange={(event) => setPrimaryDomain(event.target.value)}
+          placeholder="example.com"
           required
         />
         <label className="field-label" htmlFor="setup-password">

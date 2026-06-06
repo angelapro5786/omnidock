@@ -49,7 +49,7 @@ export async function getSetupStatus(env: RuntimeEnv): Promise<SetupStatus> {
 
 export async function createAdminAccount(
   env: RuntimeEnv,
-  input: { name: string; email: string; password: string }
+  input: { name: string; email: string; recoveryEmail?: string | null; password: string }
 ): Promise<void> {
   await ensureDatabaseSchema(env);
   const existing = await getAdminAuth(env);
@@ -59,6 +59,7 @@ export async function createAdminAccount(
 
   const name = normalizeAdminName(input.name);
   const email = normalizeAdminEmail(input.email);
+  const recoveryEmail = input.recoveryEmail ? normalizeAdminEmail(input.recoveryEmail) : email;
   validatePassword(input.password);
 
   const salt = randomSalt();
@@ -71,7 +72,7 @@ export async function createAdminAccount(
     )
     VALUES ('primary', ?, ?, ?, ?, ?)`
   )
-    .bind(hash, salt, PASSWORD_ITERATIONS, name, email)
+    .bind(hash, salt, PASSWORD_ITERATIONS, name, recoveryEmail)
     .run();
 }
 

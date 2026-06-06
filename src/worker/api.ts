@@ -68,18 +68,35 @@ export async function handleApi(
 
     if (url.pathname === "/api/setup/status") {
       if (request.method !== "GET") return methodNotAllowed();
-      return json({ ok: true, ...(await getSetupStatus(env)) });
+      return json({
+        ok: true,
+        ...(await getSetupStatus(env)),
+        primaryDomain: configuredPrimaryDomain(env)
+      });
     }
 
     if (url.pathname === "/api/setup") {
       if (request.method !== "POST") return methodNotAllowed();
       const body = await readJson(request);
+      const setup = await getSetupStatus(env);
+      if (!setup.setupRequired) {
+        throw new ApiError(409, "setup_complete", "Admin account is already configured");
+      }
+      const primaryDomain = normalizeDomain(requiredString(body, "primaryDomain", { min: 3, max: 253 }));
+      const recoveryEmail = optionalString(body, "recoveryEmail", { max: 320 });
+      const domain = await upsertDomain(env, {
+        domain: primaryDomain,
+        source: "setup",
+        status: "manual"
+      });
+      await setDefaultDomain(env, domain.id);
       await createAdminAccount(env, {
         name: requiredString(body, "name", { min: 2, max: 160 }),
         email: requiredString(body, "email", { max: 320 }),
+        recoveryEmail,
         password: requiredString(body, "password", { min: 12, max: 256 })
       });
-      ctx.waitUntil(recordAudit(env, "admin.created", "primary", {}));
+      ctx.waitUntil(recordAudit(env, "admin.created", "primary", { primaryDomain }));
       return json({ ok: true }, { status: 201 });
     }
 
@@ -409,6 +426,19 @@ function publicOrigin(request: Request, env: RuntimeEnv): string {
     return `https://${managementHost}`;
   }
   return url.origin;
+}
+
+function configuredPrimaryDomain(env: RuntimeEnv): string | null {
+  const domain = env.PRIMARY_DOMAIN?.trim();
+  if (!domain || domain.toLowerCase() === "example.com") {
+    return null;
+  }
+
+  try {
+    return normalizeDomain(domain);
+  } catch {
+    return null;
+  }
 }
 
 function readContactList(

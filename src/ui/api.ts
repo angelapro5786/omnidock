@@ -19,7 +19,13 @@ export function setupStatus(): Promise<SetupStatusPayload> {
   return publicRequest<SetupStatusPayload>("/api/setup/status");
 }
 
-export function createAdmin(input: { name: string; email: string; password: string }): Promise<{ ok: true }> {
+export function createAdmin(input: {
+  name: string;
+  email: string;
+  recoveryEmail: string | null;
+  primaryDomain: string;
+  password: string;
+}): Promise<{ ok: true }> {
   return publicRequest("/api/setup", {
     method: "POST",
     body: JSON.stringify(input)

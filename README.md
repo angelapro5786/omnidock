@@ -93,6 +93,8 @@ After the first deploy and D1 migration, open the Emailfox URL. If no admin acco
 
 - Name
 - Email
+- Recovery email
+- Primary domain
 - Password
 
 The password is stored only as a salted PBKDF2 hash in D1.
@@ -102,6 +104,8 @@ The password is stored only as a salted PBKDF2 hash in D1.
 ### Cloudflare API Token
 
 Create a Cloudflare API token for `CLOUDFLARE_API_TOKEN`.
+
+Cloudflare Workers Builds can create its own deploy token during the Deploy to Cloudflare flow. That token is only for building and deploying the Worker. Emailfox still needs a runtime `CLOUDFLARE_API_TOKEN` secret so the deployed Worker can call the Cloudflare API for zone inventory, Email Routing, and Email Sending status.
 
 Recommended permissions:
 
@@ -126,6 +130,7 @@ You will be asked to configure:
 
 | Value | Required | Notes |
 | --- | --- | --- |
+| `PRIMARY_DOMAIN` | Yes | Main email domain for first setup. Replace the `example.com` placeholder before build. |
 | `CLOUDFLARE_API_TOKEN` | Yes | Used for Cloudflare sync and routing rule creation. |
 | `ADMIN_PASSWORD_BOOTSTRAP` | No | Legacy/automation fallback. Leave blank for normal first-screen admin creation. |
 | `MANAGEMENT_HOST` | No | Leave blank for the generated `workers.dev` host. Set later for a custom domain. |
@@ -143,6 +148,7 @@ Use Cloudflare secrets for:
 
 Use plain Worker vars only for non-secret values:
 
+- `PRIMARY_DOMAIN`
 - `MANAGEMENT_HOST`
 - `CLOUDFLARE_ACCOUNT_ID`
 - `PASSWORD_RESET_FROM`
@@ -155,6 +161,8 @@ The deploy script runs:
 ```bash
 npm run build && npm run db:migrate:remote && wrangler deploy
 ```
+
+`npm run build` first runs `tools/validate-deploy-config.mjs`. The build stops if `PRIMARY_DOMAIN` is still `example.com`, if the D1 binding is missing, if the R2 bucket binding is missing, or if `WORKER_SCRIPT_NAME` is blank. Maintainers working on the public template can bypass only this local template check with `EMAILFOX_SKIP_CONFIG_CHECK=1 npm run build`.
 
 Cloudflare provisions the D1/R2 resources before running the configured deploy command in the one-click flow. The migration command then uses the binding name `DB`, which is important because deployers may rename the actual D1 database.
 
@@ -170,9 +178,9 @@ If the Cloudflare setup screen asks for commands, use:
 After deploy:
 
 1. Open the Worker URL shown by Cloudflare.
-2. Create the first admin from the setup screen with name, email, and password.
-3. Click `Sync Cloudflare`.
-4. Select a domain.
+2. Complete the setup screen with name, email, recovery email, primary domain, and password.
+3. Log in with the password you just created.
+4. Click `Sync Cloudflare`.
 5. Create mailboxes such as `support`, `info`, or `billing`.
 6. Use `Settings > Rules` to route addresses to the Worker.
 

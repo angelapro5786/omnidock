@@ -1,1 +1,2 @@
+# Required runtime secret. Deploy to Cloudflare will prompt for this.
 CLOUDFLARE_API_TOKEN=

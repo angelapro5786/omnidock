@@ -110,6 +110,7 @@ export type SetupStatusPayload = {
   ok: true;
   setupRequired: boolean;
   resetAvailable: boolean;
+  primaryDomain: string | null;
 };
 
 export type ThreadPayload = {
