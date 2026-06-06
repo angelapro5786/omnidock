@@ -131,7 +131,7 @@ export function App() {
     setComposeOpen(false);
   }, []);
 
-  const loadSetupStatus = useCallback(async () => {
+  const loadSetupStatus = useCallback(async (options: { fallbackToChecking?: boolean } = {}) => {
     try {
       const status = await setupStatus();
       setSetup(status);
@@ -147,8 +147,10 @@ export function App() {
       }
     } catch (error) {
       setLoginError(readError(error));
-      setSetup(null);
-      setAuthView("checking");
+      if (options.fallbackToChecking !== false) {
+        setSetup(null);
+        setAuthView("checking");
+      }
     }
   }, [resetToken]);
 
@@ -316,7 +318,7 @@ export function App() {
     setBusy(true);
     setLoginError(null);
     try {
-      await loadSetupStatus();
+      await loadSetupStatus({ fallbackToChecking: false });
     } finally {
       setBusy(false);
     }
@@ -707,7 +709,7 @@ function ConfigurationScreen({
                 {item.configured ? <CheckCircle2 size={15} /> : <AlertTriangle size={14} />}
               </span>
               <div className="requirement-meta">
-                <span className="requirement-kind">{item.kind}</span>
+                <span className="requirement-kind">{requirementKindLabel(item.kind)}</span>
                 <span className="requirement-priority">
                   {item.configured ? "added" : item.required ? "required" : "optional"}
                 </span>
@@ -735,11 +737,15 @@ function ConfigurationScreen({
         </div>
         <button className="button ghost wide" type="button" onClick={onRetry} disabled={busy}>
           <RefreshCw size={16} />
-          Retry setup check
+          {busy ? "Checking setup" : "Retry setup check"}
         </button>
       </section>
     </main>
   );
+}
+
+function requirementKindLabel(kind: RuntimeRequirement["kind"]): string {
+  return kind === "variable" ? "plain" : kind;
 }
 
 function SetupScreen({

@@ -31,6 +31,9 @@
   --warn: #b7791f;
   --warn-soft: #fff8e8;
   --warn-line: #f0d093;
+  --ok: #2563eb;
+  --ok-soft: #eaf2ff;
+  --ok-line: #93c5fd;
   --danger: #b42318;
   --focus-ring: rgba(15, 118, 110, 0.16);
   --shadow: 0 1px 2px rgba(19, 31, 36, 0.12), 0 12px 34px rgba(19, 31, 36, 0.08);
@@ -68,6 +71,9 @@
   --warn: #f0d77a;
   --warn-soft: #332a12;
   --warn-line: #725f20;
+  --ok: #38bdf8;
+  --ok-soft: #082f49;
+  --ok-line: #0ea5e9;
   --danger: #fb7185;
   --focus-ring: rgba(34, 197, 94, 0.28);
   --shadow: 0 1px 0 rgba(134, 239, 172, 0.08), 0 18px 50px rgba(0, 0, 0, 0.32);
@@ -90,6 +96,9 @@
   --hover-line: #e95420;
   --primary-hover: #6f210d;
   --focus-ring: rgba(233, 84, 32, 0.18);
+  --ok: #2563eb;
+  --ok-soft: #eaf2ff;
+  --ok-line: #93c5fd;
 }
 
 :root[data-palette="fedora"] {
@@ -108,6 +117,9 @@
   --hover-line: #3c6eb4;
   --primary-hover: #20345c;
   --focus-ring: rgba(60, 110, 180, 0.18);
+  --ok: #0891b2;
+  --ok-soft: #e6f7fb;
+  --ok-line: #67e8f9;
 }
 
 :root[data-palette="plasma"] {
@@ -126,6 +138,9 @@
   --hover-line: #1d99f3;
   --primary-hover: #084a7d;
   --focus-ring: rgba(29, 153, 243, 0.18);
+  --ok: #0ea5e9;
+  --ok-soft: #e0f2fe;
+  --ok-line: #7dd3fc;
 }
 
 :root[data-palette="graphite"] {
@@ -157,6 +172,9 @@
   --warn: #f0bf69;
   --warn-soft: #3a2f1e;
   --warn-line: #6e5325;
+  --ok: #38bdf8;
+  --ok-soft: #102a3a;
+  --ok-line: #0ea5e9;
   --focus-ring: rgba(154, 164, 175, 0.24);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.38), 0 16px 44px rgba(0, 0, 0, 0.24);
   --shadow-strong: 0 24px 90px rgba(0, 0, 0, 0.5);
@@ -1510,8 +1528,14 @@ button:hover:not(:disabled) {
   color: var(--warn);
 }
 
+.requirement-row.is-configured {
+  border-color: color-mix(in srgb, var(--ok-line) 72%, var(--line-strong));
+}
+
 .requirement-row.is-configured .requirement-status {
-  color: var(--accent-strong);
+  border-color: var(--ok-line);
+  background: var(--ok-soft);
+  color: var(--ok);
 }
 
 .requirement-row.is-optional {
@@ -1555,7 +1579,7 @@ button:hover:not(:disabled) {
 }
 
 .requirement-row.is-configured .requirement-priority {
-  color: var(--accent-strong);
+  color: var(--ok);
 }
 
 .requirement-row.is-optional .requirement-priority {
