@@ -922,6 +922,9 @@ button:hover:not(:disabled) {
   align-items: center;
   justify-content: center;
   gap: 6px;
+  flex: 0 0 auto;
+  max-width: 100%;
+  min-width: max-content;
   width: fit-content;
   height: 24px;
   padding: 0 7px;
@@ -933,6 +936,7 @@ button:hover:not(:disabled) {
   font-weight: 700;
   line-height: 1;
   white-space: nowrap;
+  overflow: visible;
 }
 
 .status-pill svg {

@@ -78,6 +78,7 @@ const PALETTE_KEY = "omnidock.palette";
 const DEFAULT_MAILBOX_KEY = "omnidock.defaultMailbox";
 const REFRESH_INTERVAL_KEY = "omnidock.refreshIntervalSeconds";
 const DEFAULT_REFRESH_INTERVAL_SECONDS = 10;
+const EXTERNAL_MAILBOX_SCOPE_PREFIX = "external:";
 
 const folders: { key: FolderKey; label: string; icon: typeof Inbox }[] = [
   { key: "inbox", label: "Inbox", icon: Inbox },
@@ -419,11 +420,12 @@ function AppContent() {
     setBusy(true);
     try {
       const data = await api.bootstrap();
-      const hasMailboxes = data.mailboxes.length > 0;
+      const mailboxScopes = [...data.mailboxes.map((mailbox) => mailbox.id), ...(data.externalAccounts ?? []).map(externalMailboxScopeId)];
+      const hasMailboxScopes = mailboxScopes.length > 0;
       const defaultDomain = data.domains.find((domain) => domain.is_default === 1) ?? null;
       sessionStorage.setItem(PASSWORD_KEY, password);
       setBootstrap(data);
-      setThreads(hasMailboxes ? [] : data.threads);
+      setThreads(hasMailboxScopes ? [] : data.threads);
       setFolderStats(data.stats);
       setSelectedDomainId((current) =>
         current && data.domains.some((domain) => domain.id === current)
@@ -431,13 +433,12 @@ function AppContent() {
           : defaultDomain?.id ?? data.domains[0]?.id ?? null
       );
       setSelectedMailboxId((current) => {
-        if (current && data.mailboxes.some((mailbox) => mailbox.id === current)) return current;
+        if (current && mailboxScopes.includes(current)) return current;
 
         const storedDefaultId = localStorage.getItem(DEFAULT_MAILBOX_KEY) ?? "";
-        const storedDefaultMailbox = data.mailboxes.find((mailbox) => mailbox.id === storedDefaultId);
-        if (storedDefaultMailbox) {
-          setDefaultMailboxId(storedDefaultMailbox.id);
-          return storedDefaultMailbox.id;
+        if (storedDefaultId && mailboxScopes.includes(storedDefaultId)) {
+          setDefaultMailboxId(storedDefaultId);
+          return storedDefaultId;
         }
 
         if (storedDefaultId) {
@@ -445,12 +446,12 @@ function AppContent() {
           setDefaultMailboxId("");
         }
 
-        return data.mailboxes[0]?.id ?? null;
+        return mailboxScopes[0] ?? null;
       });
       setSelectedBucketId((current) =>
         current && data.buckets.some((bucket) => bucket.id === current) ? current : data.buckets[0]?.id ?? null
       );
-      setActiveThreadId((current) => (hasMailboxes ? null : current ?? data.threads[0]?.thread_id ?? null));
+      setActiveThreadId((current) => (hasMailboxScopes ? null : current ?? data.threads[0]?.thread_id ?? null));
       setLoginError(null);
       setNotice(null);
     } catch (error) {
@@ -734,6 +735,9 @@ function AppContent() {
   const buckets = bootstrap.buckets ?? [];
   const activeDomain = domains.find((domain) => domain.id === selectedDomainId) ?? null;
   const activeMailbox = mailboxes.find((mailbox) => mailbox.id === selectedMailboxId) ?? null;
+  const activeExternalAccount = externalAccountFromScope(selectedMailboxId, externalAccounts);
+  const activeMailboxLabel = activeMailbox?.address ?? activeExternalAccount?.email ?? null;
+  const mailboxScopeOptions = combinedMailboxOptions(mailboxes, externalAccounts);
   const activeBucket = buckets.find((bucket) => bucket.id === selectedBucketId) ?? buckets[0] ?? null;
   const changeMailboxScope = (mailboxId: string | null) => {
     setSelectedMailboxId(mailboxId);
@@ -742,17 +746,18 @@ function AppContent() {
     setThread(null);
   };
   const defaultMailbox = mailboxes.find((mailbox) => mailbox.id === defaultMailboxId) ?? null;
+  const defaultExternalAccount = externalAccountFromScope(defaultMailboxId, externalAccounts);
   const setDefaultMailboxPreference = () => {
-    if (!activeMailbox) {
+    if (!selectedMailboxId || !activeMailboxLabel) {
       localStorage.removeItem(DEFAULT_MAILBOX_KEY);
       setDefaultMailboxId("");
       setNotice("Default mailbox cleared");
       return;
     }
 
-    localStorage.setItem(DEFAULT_MAILBOX_KEY, activeMailbox.id);
-    setDefaultMailboxId(activeMailbox.id);
-    setNotice(`Default mailbox set to ${activeMailbox.address}`);
+    localStorage.setItem(DEFAULT_MAILBOX_KEY, selectedMailboxId);
+    setDefaultMailboxId(selectedMailboxId);
+    setNotice(`Default mailbox set to ${activeMailboxLabel}`);
   };
   const changeRefreshIntervalSeconds = (value: number) => {
     const nextValue = Number.isFinite(value) ? Math.round(value) : DEFAULT_REFRESH_INTERVAL_SECONDS;
@@ -770,6 +775,7 @@ function AppContent() {
       <Sidebar
         managementHost={bootstrap?.managementHost ?? window.location.host}
         mailboxes={mailboxes}
+        externalAccounts={externalAccounts}
         buckets={buckets}
         stats={folderStats}
         folder={folder}
@@ -802,30 +808,31 @@ function AppContent() {
                 <CustomSelect
                   value={selectedMailboxId ?? ""}
                   onChange={(value) => changeMailboxScope(value || null)}
-                  disabled={mailboxes.length === 0}
+                  disabled={mailboxScopeOptions.length === 0}
                   title="Mailbox scope"
-                  options={[
-                    { value: "", label: "All mailboxes" },
-                    ...mailboxes.map((mailbox) => ({ value: mailbox.id, label: mailbox.address }))
-                  ]}
+                  options={[{ value: "", label: "All mailboxes" }, ...mailboxScopeOptions]}
                 />
                 <button
-                  className={activeMailbox && defaultMailbox?.id === activeMailbox.id ? "icon-button default-active" : "icon-button"}
+                  className={
+                    selectedMailboxId && (defaultMailbox?.id === selectedMailboxId || externalMailboxScopeId(defaultExternalAccount) === selectedMailboxId)
+                      ? "icon-button default-active"
+                      : "icon-button"
+                  }
                   type="button"
                   onClick={setDefaultMailboxPreference}
-                  disabled={mailboxes.length === 0}
+                  disabled={mailboxScopeOptions.length === 0}
                   title={
-                    activeMailbox
-                      ? defaultMailbox?.id === activeMailbox.id
-                        ? `${activeMailbox.address} opens by default`
-                        : `Open ${activeMailbox.address} by default`
+                    activeMailboxLabel
+                      ? defaultMailbox?.id === selectedMailboxId || externalMailboxScopeId(defaultExternalAccount) === selectedMailboxId
+                        ? `${activeMailboxLabel} opens by default`
+                        : `Open ${activeMailboxLabel} by default`
                       : "Use all mailboxes as the default view"
                   }
                   aria-label={
-                    activeMailbox
-                      ? defaultMailbox?.id === activeMailbox.id
-                        ? `${activeMailbox.address} is the default mailbox`
-                        : `Set ${activeMailbox.address} as default mailbox`
+                    activeMailboxLabel
+                      ? defaultMailbox?.id === selectedMailboxId || externalMailboxScopeId(defaultExternalAccount) === selectedMailboxId
+                        ? `${activeMailboxLabel} is the default mailbox`
+                        : `Set ${activeMailboxLabel} as default mailbox`
                       : "Clear default mailbox"
                   }
                 >
@@ -927,7 +934,7 @@ function AppContent() {
               threads={threads}
               activeThreadId={activeThreadId}
               folder={folder}
-              activeMailbox={activeMailbox}
+              activeMailboxLabel={activeMailboxLabel}
               onSelect={(threadId) => setActiveThreadId(threadId)}
             />
             <ThreadDetail
@@ -951,8 +958,8 @@ function AppContent() {
           omnidock
         </span>
         <span>{activeDomain?.domain ?? `${domains.length} domains`}</span>
-        <span>{view === "buckets" ? activeBucket?.name ?? "Buckets" : activeMailbox?.address ?? "All mailboxes"}</span>
-        <span>{mailboxes.length} mailboxes</span>
+        <span>{view === "buckets" ? activeBucket?.name ?? "Buckets" : activeMailboxLabel ?? "All mailboxes"}</span>
+        <span>{mailboxScopeOptions.length} mailboxes</span>
         <span>{activePalette.label}</span>
       </footer>
 
@@ -1763,9 +1770,35 @@ function bucketOptionsForSelect(buckets: BucketRow[]): SelectOption[] {
       }));
 }
 
+function externalMailboxScopeId(account: ExternalAccountRow | null | undefined): string {
+  return account ? `${EXTERNAL_MAILBOX_SCOPE_PREFIX}${account.id}` : "";
+}
+
+function externalAccountFromScope(scopeId: string | null, accounts: ExternalAccountRow[]): ExternalAccountRow | null {
+  if (!scopeId?.startsWith(EXTERNAL_MAILBOX_SCOPE_PREFIX)) return null;
+  const accountId = scopeId.slice(EXTERNAL_MAILBOX_SCOPE_PREFIX.length);
+  return accounts.find((account) => account.id === accountId) ?? null;
+}
+
+function combinedMailboxOptions(mailboxes: MailboxRow[], externalAccounts: ExternalAccountRow[]): SelectOption[] {
+  return [
+    ...mailboxes.map((mailbox) => ({
+      value: mailbox.id,
+      label: mailbox.address,
+      description: "OmniDock mailbox"
+    })),
+    ...externalAccounts.map((account) => ({
+      value: externalMailboxScopeId(account),
+      label: account.email,
+      description: `${externalProviderLabel(account.provider)} external account`
+    }))
+  ];
+}
+
 function Sidebar({
   managementHost,
   mailboxes,
+  externalAccounts,
   buckets,
   stats,
   folder,
@@ -1781,6 +1814,7 @@ function Sidebar({
 }: {
   managementHost: string;
   mailboxes: MailboxRow[];
+  externalAccounts: ExternalAccountRow[];
   buckets: BucketRow[];
   stats: Record<string, number>;
   folder: FolderKey;
@@ -1795,6 +1829,7 @@ function Sidebar({
   onLock: () => void;
 }) {
   const bucketOptions = bucketOptionsForSelect(buckets);
+  const mailboxOptions = combinedMailboxOptions(mailboxes, externalAccounts);
 
   return (
     <aside className="sidebar">
@@ -1811,12 +1846,8 @@ function Sidebar({
         <CustomSelect
           value={selectedMailboxId ?? ""}
           onChange={(value) => onMailboxChange(value || null)}
-          disabled={mailboxes.length === 0}
-          options={
-            mailboxes.length === 0
-              ? [{ value: "", label: "No mailboxes" }]
-              : [{ value: "", label: "All mailboxes" }, ...mailboxes.map((mailbox) => ({ value: mailbox.id, label: mailbox.address }))]
-          }
+          disabled={mailboxOptions.length === 0}
+          options={mailboxOptions.length === 0 ? [{ value: "", label: "No mailboxes" }] : [{ value: "", label: "All mailboxes" }, ...mailboxOptions]}
         />
       </label>
 
@@ -2749,7 +2780,7 @@ function ExternalAccountsView({
                     <strong>{account.email}</strong>
                     <span>{externalProviderLabel(account.provider)}</span>
                   </div>
-                  <StatusPill ok={account.status === "configured"} label={account.status === "configured" ? "Secret set" : "Needs secret"} />
+                  <StatusPill ok={account.status === "configured"} label={account.status === "configured" ? "Ready" : "No secret"} />
                 </button>
               ))
             )}
@@ -3592,13 +3623,13 @@ function ThreadList({
   threads,
   activeThreadId,
   folder,
-  activeMailbox,
+  activeMailboxLabel,
   onSelect
 }: {
   threads: ThreadRow[];
   activeThreadId: string | null;
   folder: FolderKey;
-  activeMailbox: MailboxRow | null;
+  activeMailboxLabel: string | null;
   onSelect: (threadId: string) => void;
 }) {
   return (
@@ -3606,7 +3637,7 @@ function ThreadList({
       <div className="pane-head">
         <div>
           <span>{folder}</span>
-          <strong>{activeMailbox?.address ?? "All mailboxes"}</strong>
+          <strong>{activeMailboxLabel ?? "All mailboxes"}</strong>
           <small>{threads.length} threads</small>
         </div>
         <FolderGit2 size={16} />

@@ -127,6 +127,8 @@ export type ExternalAccountRow = {
   updated_at: string;
 };
 
+const EXTERNAL_MAILBOX_SCOPE_PREFIX = "external:";
+
 export type ThreadRow = MessageRow & {
   message_count: number;
   unread_count: number;
@@ -221,6 +223,10 @@ export async function listExternalAccounts(env: RuntimeEnv): Promise<ExternalAcc
     "SELECT * FROM external_accounts ORDER BY email COLLATE NOCASE ASC LIMIT 200"
   ).all<ExternalAccountRow>();
   return result.results ?? [];
+}
+
+export async function getExternalAccountById(env: RuntimeEnv, id: string): Promise<ExternalAccountRow | null> {
+  return (await env.DB.prepare("SELECT * FROM external_accounts WHERE id = ?").bind(id).first<ExternalAccountRow>()) ?? null;
 }
 
 export async function upsertExternalAccount(
@@ -897,10 +903,15 @@ export async function listThreads(
   }
 
   if (options.mailboxId) {
-    const mailbox = await getMailboxById(env, options.mailboxId);
-    if (mailbox) {
+    const externalAccountId = externalAccountIdFromMailboxScope(options.mailboxId);
+    const scopedAddress = externalAccountId
+      ? (await getExternalAccountById(env, externalAccountId))?.email
+      : (await getMailboxById(env, options.mailboxId))?.address;
+    if (scopedAddress) {
       filters.push("(m.mailbox = ? OR (m.direction = 'outbound' AND m.from_address = ?))");
-      params.push(mailbox.address, mailbox.address);
+      params.push(scopedAddress, scopedAddress);
+    } else {
+      filters.push("1 = 0");
     }
   }
 
@@ -1057,8 +1068,11 @@ export async function getMailboxStats(env: RuntimeEnv, mailboxId: string | null)
     return getStats(env);
   }
 
-  const mailbox = await getMailboxById(env, mailboxId);
-  if (!mailbox) {
+  const externalAccountId = externalAccountIdFromMailboxScope(mailboxId);
+  const scopedAddress = externalAccountId
+    ? (await getExternalAccountById(env, externalAccountId))?.email
+    : (await getMailboxById(env, mailboxId))?.address;
+  if (!scopedAddress) {
     return { domains: 0, mailboxes: 0, contacts: 0, external_accounts: 0, inbox: 0, sent: 0, archive: 0, unread: 0 };
   }
 
@@ -1073,10 +1087,14 @@ export async function getMailboxStats(env: RuntimeEnv, mailboxId: string | null)
       (SELECT COUNT(*) FROM messages WHERE archived_at IS NOT NULL AND (mailbox = ? OR (direction = 'outbound' AND from_address = ?))) AS archive,
       (SELECT COUNT(*) FROM messages WHERE direction = 'inbound' AND read_at IS NULL AND archived_at IS NULL AND mailbox = ?) AS unread`
   )
-    .bind(mailbox.address, mailbox.address, mailbox.address, mailbox.address, mailbox.address)
+    .bind(scopedAddress, scopedAddress, scopedAddress, scopedAddress, scopedAddress)
     .first<Record<string, number>>();
 
   return rows ?? { domains: 0, mailboxes: 0, contacts: 0, external_accounts: 0, inbox: 0, sent: 0, archive: 0, unread: 0 };
+}
+
+function externalAccountIdFromMailboxScope(mailboxId: string): string | null {
+  return mailboxId.startsWith(EXTERNAL_MAILBOX_SCOPE_PREFIX) ? mailboxId.slice(EXTERNAL_MAILBOX_SCOPE_PREFIX.length) : null;
 }
 
 export async function recordAudit(
