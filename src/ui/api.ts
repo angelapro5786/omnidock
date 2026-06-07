@@ -3,6 +3,7 @@ import {
   BucketObjectsPayload,
   BucketSearchPayload,
   BucketTextIndexPayload,
+  AuditLogsPayload,
   ContactRow,
   DomainRow,
   ExternalAccountRow,
@@ -11,6 +12,8 @@ import {
   ThreadPayload,
   ThreadRow
 } from "./types";
+
+const SEND_REQUEST_TIMEOUT_MS = 70_000;
 
 export type AttachmentDraft = {
   filename: string;
@@ -196,6 +199,18 @@ export class ApiClient {
     return this.request("/api/sync/external");
   }
 
+  resumeExternalSync(): Promise<{ ok: true; jobs: ExternalSyncJobRow[] }> {
+    return this.request("/api/sync/external/run", { method: "POST" });
+  }
+
+  auditLogs(input: { query?: string; limit?: number } = {}): Promise<AuditLogsPayload> {
+    const params = new URLSearchParams();
+    if (input.query?.trim()) params.set("q", input.query.trim());
+    if (input.limit) params.set("limit", String(input.limit));
+    const suffix = params.toString() ? `?${params.toString()}` : "";
+    return this.request<AuditLogsPayload>(`/api/audit-logs${suffix}`);
+  }
+
   deleteExternalAccount(id: string): Promise<unknown> {
     return this.request(`/api/external-accounts/${id}`, { method: "DELETE" });
   }
@@ -221,10 +236,15 @@ export class ApiClient {
     attachments?: AttachmentDraft[];
   }): Promise<unknown> {
     const path = input.replyToThreadId ? `/api/threads/${input.replyToThreadId}/reply` : "/api/send";
-    return this.request(path, {
-      method: "POST",
-      body: JSON.stringify(input)
-    });
+    return this.requestWithTimeout(
+      path,
+      {
+        method: "POST",
+        body: JSON.stringify(input)
+      },
+      SEND_REQUEST_TIMEOUT_MS,
+      "Sending timed out. Check the Gmail app password secret and SMTP settings, then try again."
+    );
   }
 
   changePassword(password: string): Promise<unknown> {
@@ -340,6 +360,30 @@ export class ApiClient {
 
     return payload as T;
   }
+
+  private async requestWithTimeout<T>(
+    path: string,
+    init: RequestInit,
+    timeoutMs: number,
+    timeoutMessage: string
+  ): Promise<T> {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      return await this.request<T>(path, {
+        ...init,
+        signal: controller.signal
+      });
+    } catch (error) {
+      if (isAbortError(error)) {
+        throw new ApiRequestError(504, timeoutMessage);
+      }
+      throw error;
+    } finally {
+      window.clearTimeout(timeoutId);
+    }
+  }
 }
 
 async function readApiResponse<T = unknown>(response: Response): Promise<T> {
@@ -382,4 +426,8 @@ export class ApiRequestError extends Error {
     super(message);
     this.name = "ApiRequestError";
   }
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
 }

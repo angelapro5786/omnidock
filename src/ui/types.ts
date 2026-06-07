@@ -140,6 +140,15 @@ export type ExternalSyncJobRow = {
   completed_at: string | null;
 };
 
+export type AuditLogRow = {
+  id: string;
+  action: string;
+  actor: string;
+  target: string | null;
+  metadata_json: string;
+  created_at: string;
+};
+
 export type BucketRow = {
   id: string;
   name: string;
@@ -225,6 +234,11 @@ export type BucketTextIndexRow = {
 export type BucketTextIndexPayload = {
   ok: true;
   index: BucketTextIndexRow | null;
+};
+
+export type AuditLogsPayload = {
+  ok: true;
+  logs: AuditLogRow[];
 };
 
 export type SetupStatusPayload = {

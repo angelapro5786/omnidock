@@ -961,6 +961,18 @@ button:hover:not(:disabled) {
   background: var(--accent-soft);
 }
 
+.status-pill.error {
+  border-color: color-mix(in srgb, var(--danger) 70%, var(--line));
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, var(--panel));
+}
+
+.status-pill.warn {
+  border-color: var(--warn-line);
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+
 .rules-shell {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -1007,6 +1019,136 @@ button:hover:not(:disabled) {
   gap: 12px;
   height: 100%;
   min-height: 0;
+}
+
+.logs-shell {
+  display: grid;
+}
+
+.logs-card {
+  grid-column: 1 / -1;
+  height: 100%;
+}
+
+.log-toolbar {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto auto auto;
+  align-items: center;
+  gap: 8px;
+  min-width: min(720px, 100%);
+}
+
+.search-wrap.compact {
+  height: 34px;
+  padding: 0 10px;
+}
+
+.search-wrap.compact input {
+  font-size: 13px;
+}
+
+.log-error {
+  margin: 10px 14px 0;
+}
+
+.log-table-wrap {
+  min-height: 0;
+  overflow: auto;
+}
+
+.log-table {
+  width: 100%;
+  min-width: 980px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.log-table th,
+.log-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+  text-align: left;
+}
+
+.log-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel-alt);
+  color: var(--muted);
+  font: 11px/1 var(--mono);
+  text-transform: uppercase;
+}
+
+.log-table th:nth-child(1),
+.log-table td:nth-child(1) {
+  width: 190px;
+}
+
+.log-table th:nth-child(2),
+.log-table td:nth-child(2) {
+  width: 118px;
+}
+
+.log-table th:nth-child(3),
+.log-table td:nth-child(3) {
+  width: 210px;
+}
+
+.log-table th:nth-child(4),
+.log-table td:nth-child(4) {
+  width: 220px;
+}
+
+.log-table tbody tr {
+  background: var(--panel);
+}
+
+.log-table tbody tr:hover {
+  background: var(--selected);
+  color: var(--text);
+}
+
+.log-table tbody tr.error-row {
+  background: color-mix(in srgb, var(--danger) 4%, var(--panel));
+}
+
+.log-table tbody tr.error-row:hover {
+  background: color-mix(in srgb, var(--danger) 8%, var(--panel));
+}
+
+.log-table time,
+.log-table code,
+.log-table small,
+.log-table span {
+  color: inherit;
+}
+
+.log-table time,
+.log-table code,
+.log-table small,
+.log-table td:last-child span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.log-table time,
+.log-table code,
+.log-table small {
+  font: 11px/1.35 var(--mono);
+}
+
+.log-table strong {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 13px;
+}
+
+.log-table td:last-child span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .bucket-shell {

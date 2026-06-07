@@ -60,6 +60,10 @@ type SmtpSecurity = "ssl" | "starttls" | "none";
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const MAX_TOTAL_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const MAX_ATTACHMENT_COUNT = 10;
+const SMTP_CONNECT_TIMEOUT_MS = 12_000;
+const SMTP_COMMAND_TIMEOUT_MS = 15_000;
+const SMTP_DATA_TIMEOUT_MS = 45_000;
+const SMTP_QUIT_TIMEOUT_MS = 3_000;
 
 export async function receiveEmail(
   message: ForwardableEmailMessage,
@@ -454,6 +458,7 @@ class SmtpClient {
   private reader: ReadableStreamDefaultReader<Uint8Array>;
   private writer: WritableStreamDefaultWriter<Uint8Array>;
   private buffer = new Uint8Array(0);
+  private closed = false;
 
   private constructor(private socket: Socket) {
     this.reader = socket.readable.getReader();
@@ -466,16 +471,18 @@ class SmtpClient {
       { hostname: input.host, port: input.port },
       { secureTransport, allowHalfOpen: false }
     );
-    await socket.opened;
+    await withSmtpTimeout(socket.opened, SMTP_CONNECT_TIMEOUT_MS, "SMTP connection", () => socket.close().catch(() => undefined));
     let client = new SmtpClient(socket);
     await client.expect([220]);
     await client.ehlo();
 
     if (input.security === "starttls") {
-      await client.command("STARTTLS", [220]);
+      await client.command("STARTTLS", [220], SMTP_COMMAND_TIMEOUT_MS, "SMTP STARTTLS");
       const tlsSocket = socket.startTls({ expectedServerHostname: input.host });
-      await tlsSocket.opened;
-      client.release();
+      await withSmtpTimeout(tlsSocket.opened, SMTP_CONNECT_TIMEOUT_MS, "SMTP TLS handshake", () =>
+        tlsSocket.close().catch(() => undefined)
+      );
+      client.releaseLocks();
       client = new SmtpClient(tlsSocket);
       await client.ehlo();
     }
@@ -484,48 +491,55 @@ class SmtpClient {
   }
 
   async authenticate(username: string, password: string): Promise<void> {
-    await this.command("AUTH LOGIN", [334]);
-    await this.command(base64Utf8(username), [334]);
-    await this.command(base64Utf8(password), [235]);
+    await this.command("AUTH LOGIN", [334], SMTP_COMMAND_TIMEOUT_MS, "SMTP authentication");
+    await this.command(base64Utf8(username), [334], SMTP_COMMAND_TIMEOUT_MS, "SMTP username");
+    await this.command(base64Utf8(password), [235], SMTP_COMMAND_TIMEOUT_MS, "SMTP password");
   }
 
   async send(from: string, recipients: string[], mime: string): Promise<void> {
-    await this.command(`MAIL FROM:<${from}>`, [250]);
+    await this.command(`MAIL FROM:<${from}>`, [250], SMTP_COMMAND_TIMEOUT_MS, "SMTP sender");
     for (const recipient of recipients) {
-      await this.command(`RCPT TO:<${recipient}>`, [250, 251]);
+      await this.command(`RCPT TO:<${recipient}>`, [250, 251], SMTP_COMMAND_TIMEOUT_MS, "SMTP recipient");
     }
-    await this.command("DATA", [354]);
-    await this.write(`${dotStuff(mime)}\r\n.\r\n`);
-    await this.expect([250]);
+    await this.command("DATA", [354], SMTP_COMMAND_TIMEOUT_MS, "SMTP DATA");
+    await this.write(`${dotStuff(mime)}\r\n.\r\n`, SMTP_DATA_TIMEOUT_MS, "SMTP message upload");
+    await this.expect([250], SMTP_DATA_TIMEOUT_MS, "SMTP message acceptance");
   }
 
   async quit(): Promise<void> {
+    if (this.closed) return;
     try {
-      await this.command("QUIT", [221]);
+      await this.command("QUIT", [221], SMTP_QUIT_TIMEOUT_MS, "SMTP quit");
     } catch {
       // The server can close first; force-close below is enough.
     }
-    this.release();
+    this.releaseLocks();
     await this.socket.close().catch(() => undefined);
+    this.closed = true;
   }
 
   private async ehlo(): Promise<void> {
     await this.command("EHLO omnidock.local", [250]);
   }
 
-  private async command(command: string, expected: number[]): Promise<string[]> {
-    await this.write(`${command}\r\n`);
-    return this.expect(expected);
+  private async command(
+    command: string,
+    expected: number[],
+    timeoutMs = SMTP_COMMAND_TIMEOUT_MS,
+    label = describeSmtpCommand(command)
+  ): Promise<string[]> {
+    await this.write(`${command}\r\n`, timeoutMs, label);
+    return this.expect(expected, timeoutMs, label);
   }
 
-  private async write(value: string): Promise<void> {
-    await this.writer.write(new TextEncoder().encode(value));
+  private async write(value: string, timeoutMs = SMTP_COMMAND_TIMEOUT_MS, label = "SMTP write"): Promise<void> {
+    await this.withTimeout(this.writer.write(new TextEncoder().encode(value)), timeoutMs, label);
   }
 
-  private async expect(expected: number[]): Promise<string[]> {
+  private async expect(expected: number[], timeoutMs = SMTP_COMMAND_TIMEOUT_MS, label = "SMTP response"): Promise<string[]> {
     const lines: string[] = [];
     for (;;) {
-      const line = await this.readLine();
+      const line = await this.readLine(timeoutMs, label);
       lines.push(line);
       const code = Number.parseInt(line.slice(0, 3), 10);
       if (!line.startsWith(`${line.slice(0, 3)}-`)) {
@@ -537,7 +551,7 @@ class SmtpClient {
     }
   }
 
-  private async readLine(): Promise<string> {
+  private async readLine(timeoutMs: number, label: string): Promise<string> {
     for (;;) {
       const index = indexOfCrlf(this.buffer);
       if (index >= 0) {
@@ -545,12 +559,12 @@ class SmtpClient {
         this.buffer = this.buffer.slice(index + 2);
         return new TextDecoder().decode(lineBytes);
       }
-      await this.readMore();
+      await this.readMore(timeoutMs, label);
     }
   }
 
-  private async readMore(): Promise<void> {
-    const chunk = await this.reader.read();
+  private async readMore(timeoutMs: number, label: string): Promise<void> {
+    const chunk = await this.withTimeout(this.reader.read(), timeoutMs, label);
     if (chunk.done || !chunk.value) {
       throw new ApiError(502, "smtp_connection_closed", "SMTP connection closed unexpectedly");
     }
@@ -560,9 +574,32 @@ class SmtpClient {
     this.buffer = merged;
   }
 
-  private release(): void {
-    this.reader.releaseLock();
-    this.writer.releaseLock();
+  private async withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+    return withSmtpTimeout(promise, timeoutMs, label, () => this.forceClose());
+  }
+
+  private async forceClose(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
+    await Promise.allSettled([
+      this.reader.cancel().catch(() => undefined),
+      this.writer.abort().catch(() => undefined),
+      this.socket.close().catch(() => undefined)
+    ]);
+    this.releaseLocks();
+  }
+
+  private releaseLocks(): void {
+    try {
+      this.reader.releaseLock();
+    } catch {
+      // Already released or canceled.
+    }
+    try {
+      this.writer.releaseLock();
+    } catch {
+      // Already released or canceled.
+    }
   }
 }
 
@@ -677,6 +714,36 @@ function indexOfCrlf(bytes: Uint8Array): number {
     if (bytes[index] === 13 && bytes[index + 1] === 10) return index;
   }
   return -1;
+}
+
+async function withSmtpTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+  onTimeout?: () => void | Promise<void>
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      void onTimeout?.();
+      reject(new ApiError(504, "smtp_timeout", `${label} timed out after ${Math.round(timeoutMs / 1000)} seconds`));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
+function describeSmtpCommand(command: string): string {
+  const verb = command.trim().split(/\s+/, 1)[0]?.toUpperCase();
+  if (!verb) return "SMTP command";
+  if (verb === "AUTH") return "SMTP authentication";
+  if (verb === "MAIL") return "SMTP sender";
+  if (verb === "RCPT") return "SMTP recipient";
+  return `SMTP ${verb}`;
 }
 
 function sanitizeSmtpStatus(value: string): string {

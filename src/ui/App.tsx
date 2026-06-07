@@ -55,6 +55,7 @@ import {
   setupStatus
 } from "./api";
 import {
+  AuditLogRow,
   AttachmentRow,
   BootstrapPayload,
   BucketFolderRow,
@@ -89,7 +90,7 @@ const folders: { key: FolderKey; label: string; icon: typeof Inbox }[] = [
   { key: "archive", label: "Archive", icon: Archive }
 ];
 
-type ViewKey = "mail" | "buckets" | "rules" | "contacts" | "signatures" | "external" | "other-settings";
+type ViewKey = "mail" | "buckets" | "rules" | "contacts" | "signatures" | "external" | "logs" | "other-settings";
 type PaletteKey = "mint" | "ubuntu" | "fedora" | "plasma" | "graphite";
 type SettingsViewKey = Exclude<ViewKey, "mail" | "buckets">;
 type AuthViewKey = "checking" | "configuration" | "login" | "setup" | "reset-request" | "reset-confirm";
@@ -379,6 +380,7 @@ function AppContent() {
   const [busy, setBusy] = useState(false);
   const [composeOpen, setComposeOpen] = useState(false);
   const externalSyncingIds = useRef<Set<string>>(new Set());
+  const externalSyncMonitorRef = useRef(false);
 
   const api = useMemo(() => (password ? new ApiClient(password) : null), [password]);
   const activePalette = palettes.find((item) => item.key === palette) ?? palettes[0];
@@ -539,6 +541,41 @@ function AppContent() {
       void loadThreads();
     }
   }, [api, bootstrap, folder, selectedMailboxId, view]);
+
+  useEffect(() => {
+    if (!api || !bootstrap || externalSyncMonitorRef.current) return;
+    const inboundAccounts = (bootstrap.externalAccounts ?? []).filter((account) => account.inbound_enabled === 1);
+    if (inboundAccounts.length === 0) return;
+
+    let cancelled = false;
+    void api.externalSyncJobs()
+      .then(async (payload) => {
+        if (cancelled || externalSyncMonitorRef.current) return;
+        const inboundIds = new Set(inboundAccounts.map((account) => account.id));
+        const activeJobs = payload.jobs.filter((job) => inboundIds.has(job.account_id) && isActiveExternalSyncJob(job));
+        if (activeJobs.length === 0) return;
+
+        externalSyncMonitorRef.current = true;
+        setSyncLog(`Resuming ${activeJobs.length} external inbox pull${activeJobs.length === 1 ? "" : "s"}...`);
+        await api.resumeExternalSync();
+        const result = await pollExternalSyncJobs(api, inboundAccounts, setSyncLog);
+        if (cancelled) return;
+        await loadBootstrap();
+        await loadThreads({ preserveSelection: true });
+        const moreText = result.timedOut ? " More mail remains; run Sync again to continue from the saved cursor." : "";
+        setNotice(`External mail synced: ${result.imported} imported, ${result.skipped} skipped.${moreText}`);
+      })
+      .catch((error) => {
+        if (!cancelled) setSyncLog(`External sync status failed: ${readError(error)}`);
+      })
+      .finally(() => {
+        externalSyncMonitorRef.current = false;
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [api, bootstrap, loadBootstrap, loadThreads]);
 
   useEffect(() => {
     if (!api || !bootstrap || view !== "mail" || !selectedExternalAccount) return;
@@ -1014,6 +1051,8 @@ function AppContent() {
             onChange={loadBootstrap}
             onNotice={setNotice}
           />
+        ) : view === "logs" ? (
+          <LogsView api={api} onNotice={setNotice} />
         ) : view === "other-settings" ? (
           <OtherSettingsView
             refreshIntervalSeconds={refreshIntervalSeconds}
@@ -1824,6 +1863,11 @@ function SettingsTitle({
       subtitle: "External email accounts",
       icon: Mail
     },
+    logs: {
+      title: "Logs",
+      subtitle: "Activity and error history",
+      icon: TerminalSquare
+    },
     "other-settings": {
       title: "Other Settings",
       subtitle: "Refresh and interface",
@@ -2006,6 +2050,11 @@ function Sidebar({
           <Mail size={16} />
           <span>External</span>
           <b>{stats.external_accounts ?? 0}</b>
+        </button>
+        <button className={view === "logs" ? "settings-link active" : "settings-link"} onClick={() => onSettingsOpen("logs")}>
+          <TerminalSquare size={16} />
+          <span>Logs</span>
+          <b>{stats.audit_logs ?? 0}</b>
         </button>
         <button
           className={view === "other-settings" ? "settings-link active" : "settings-link"}
@@ -3118,6 +3167,7 @@ async function pollExternalSyncJobs(
   failed: number;
 }> {
   const startedAt = Date.now();
+  let lastKickAt = 0;
   const accountIds = new Set(accounts.map((account) => account.id));
   const accountNames = new Map(accounts.map((account) => [account.id, account.email]));
   let latestJobs: ExternalSyncJobRow[] = [];
@@ -3128,9 +3178,14 @@ async function pollExternalSyncJobs(
     const summary = summarizeExternalSyncJobs(latestJobs);
     onProgress?.(formatExternalSyncProgress(latestJobs, accountNames, summary));
 
-    const active = latestJobs.filter((job) => job.status === "queued" || job.status === "running");
+    const active = latestJobs.filter(isActiveExternalSyncJob);
     if (active.length === 0) {
       return { ...summary, timedOut: false };
+    }
+
+    if (Date.now() - lastKickAt > 20_000) {
+      lastKickAt = Date.now();
+      await api.resumeExternalSync().catch(() => undefined);
     }
 
     if (Date.now() - startedAt >= EXTERNAL_SYNC_UI_MAX_WAIT_MS) {
@@ -3171,8 +3226,155 @@ function formatExternalSyncProgress(
   return `${state}${queuedText} | ${summary.imported} imported, ${summary.skipped} skipped, ${summary.checked} checked`;
 }
 
+function isActiveExternalSyncJob(job: ExternalSyncJobRow): boolean {
+  return job.status === "queued" || job.status === "running";
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function LogsView({
+  api,
+  onNotice
+}: {
+  api: ApiClient | null;
+  onNotice: (message: string | null) => void;
+}) {
+  const [logs, setLogs] = useState<AuditLogRow[]>([]);
+  const [query, setQuery] = useState("");
+  const [appliedQuery, setAppliedQuery] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadLogs = useCallback(
+    async (nextQuery: string) => {
+      if (!api) return;
+      setLoading(true);
+      setError(null);
+      try {
+        const payload = await api.auditLogs({ query: nextQuery, limit: 350 });
+        setLogs(payload.logs);
+      } catch (loadError) {
+        const message = readError(loadError);
+        setError(message);
+        onNotice(`Logs failed: ${message}`);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [api, onNotice]
+  );
+
+  useEffect(() => {
+    void loadLogs("");
+  }, [loadLogs]);
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const cleanQuery = query.trim();
+    setAppliedQuery(cleanQuery);
+    void loadLogs(cleanQuery);
+  }
+
+  function clearSearch() {
+    setQuery("");
+    setAppliedQuery("");
+    void loadLogs("");
+  }
+
+  return (
+    <section className="settings-shell logs-shell">
+      <section className="settings-table-card logs-card">
+        <header>
+          <div>
+            <span>Activity log</span>
+            <strong>{loading ? "Loading" : `${logs.length} rows`}</strong>
+          </div>
+          <form className="log-toolbar" onSubmit={submit}>
+            <div className="search-wrap compact">
+              <Search size={16} />
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search action, target, detail"
+              />
+            </div>
+            <button className="button" type="submit" disabled={loading}>
+              <Search size={15} />
+              Search
+            </button>
+            {appliedQuery ? (
+              <button className="button ghost" type="button" onClick={clearSearch} disabled={loading}>
+                <X size={15} />
+                Clear
+              </button>
+            ) : null}
+            <button className="button" type="button" onClick={() => void loadLogs(appliedQuery)} disabled={loading}>
+              {loading ? <Loader2 className="spin-icon" size={15} /> : <RefreshCw size={15} />}
+              Refresh
+            </button>
+          </form>
+        </header>
+        {error ? (
+          <div className="login-error compact log-error">
+            <AlertTriangle size={15} />
+            <span>{error}</span>
+          </div>
+        ) : null}
+        <div className="log-table-wrap">
+          {logs.length === 0 ? (
+            <div className="empty-list">
+              <TerminalSquare size={22} />
+              <span>No log rows</span>
+            </div>
+          ) : (
+            <table className="log-table">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                  <th>Target</th>
+                  <th>Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {logs.map((log) => {
+                  const metadata = parseAuditMetadata(log.metadata_json);
+                  const status = auditLogStatus(log, metadata);
+                  const StatusIcon = status.icon;
+                  return (
+                    <tr className={status.tone === "error" ? "error-row" : ""} key={log.id}>
+                      <td>
+                        <time>{formatDate(log.created_at)}</time>
+                      </td>
+                      <td>
+                        <span className={`status-pill ${status.tone}`}>
+                          <StatusIcon size={13} />
+                          {status.label}
+                        </span>
+                      </td>
+                      <td>
+                        <strong>{humanizeAuditAction(log.action)}</strong>
+                        <small>{log.actor}</small>
+                      </td>
+                      <td>
+                        <code>{log.target ?? "system"}</code>
+                      </td>
+                      <td>
+                        <span>{summarizeAuditMetadata(metadata)}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </section>
+    </section>
+  );
 }
 
 function OtherSettingsView({
@@ -4934,6 +5136,57 @@ function describeReceiving(
 function formatAddressList(addresses: string[]): string {
   if (addresses.length <= 2) return addresses.join(" and ");
   return `${addresses.slice(0, 2).join(", ")} and ${addresses.length - 2} more`;
+}
+
+function parseAuditMetadata(value: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function auditLogStatus(
+  log: AuditLogRow,
+  metadata: Record<string, unknown>
+): { label: string; tone: "ok" | "error" | "warn"; icon: typeof CheckCircle2 } {
+  const status = typeof metadata.status === "number" ? metadata.status : null;
+  const lowerAction = log.action.toLowerCase();
+  if (lowerAction.includes("failed") || lowerAction.includes("error") || (status !== null && status >= 400)) {
+    return { label: "Error", tone: "error", icon: AlertTriangle };
+  }
+  if (lowerAction.includes("queued")) {
+    return { label: "Queued", tone: "warn", icon: Loader2 };
+  }
+  return { label: "Success", tone: "ok", icon: CheckCircle2 };
+}
+
+function humanizeAuditAction(action: string): string {
+  return action
+    .replace(/[._-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function summarizeAuditMetadata(metadata: Record<string, unknown>): string {
+  const hidden = new Set(["password", "token", "secret", "contentbase64", "html", "text"]);
+  const entries = Object.entries(metadata)
+    .filter(([key]) => !hidden.has(key.toLowerCase()))
+    .slice(0, 8);
+
+  if (entries.length === 0) return "No details";
+
+  return entries
+    .map(([key, value]) => `${humanizeAuditAction(key)}: ${formatAuditValue(value)}`)
+    .join(" | ");
+}
+
+function formatAuditValue(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "-";
+  if (Array.isArray(value)) return value.map(formatAuditValue).join(", ");
+  if (typeof value === "object") return JSON.stringify(value).slice(0, 180);
+  if (typeof value === "boolean") return value ? "yes" : "no";
+  return String(value).slice(0, 220);
 }
 
 function formatDate(value: string): string {

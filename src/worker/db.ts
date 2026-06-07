@@ -127,6 +127,15 @@ export type ExternalAccountRow = {
   updated_at: string;
 };
 
+export type AuditLogRow = {
+  id: string;
+  action: string;
+  actor: string;
+  target: string | null;
+  metadata_json: string;
+  created_at: string;
+};
+
 const EXTERNAL_MAILBOX_SCOPE_PREFIX = "external:";
 
 export type ThreadRow = MessageRow & {
@@ -1082,13 +1091,14 @@ export async function getStats(env: RuntimeEnv): Promise<Record<string, number>>
       (SELECT COUNT(*) FROM mailboxes) AS mailboxes,
       (SELECT COUNT(*) FROM contacts) AS contacts,
       (SELECT COUNT(*) FROM external_accounts) AS external_accounts,
+      (SELECT COUNT(*) FROM audit_log) AS audit_logs,
       (SELECT COUNT(*) FROM messages WHERE direction = 'inbound' AND archived_at IS NULL) AS inbox,
       (SELECT COUNT(*) FROM messages WHERE direction = 'outbound' AND archived_at IS NULL) AS sent,
       (SELECT COUNT(*) FROM messages WHERE archived_at IS NOT NULL) AS archive,
       (SELECT COUNT(*) FROM messages WHERE direction = 'inbound' AND read_at IS NULL AND archived_at IS NULL) AS unread`
   ).first<Record<string, number>>();
 
-  return rows ?? { domains: 0, mailboxes: 0, contacts: 0, external_accounts: 0, inbox: 0, sent: 0, archive: 0, unread: 0 };
+  return rows ?? defaultStats();
 }
 
 export async function getMailboxStats(env: RuntimeEnv, mailboxId: string | null): Promise<Record<string, number>> {
@@ -1101,7 +1111,7 @@ export async function getMailboxStats(env: RuntimeEnv, mailboxId: string | null)
     ? (await getExternalAccountById(env, externalAccountId))?.email
     : (await getMailboxById(env, mailboxId))?.address;
   if (!scopedAddress) {
-    return { domains: 0, mailboxes: 0, contacts: 0, external_accounts: 0, inbox: 0, sent: 0, archive: 0, unread: 0 };
+    return defaultStats();
   }
 
   const rows = await env.DB.prepare(
@@ -1110,6 +1120,7 @@ export async function getMailboxStats(env: RuntimeEnv, mailboxId: string | null)
       (SELECT COUNT(*) FROM mailboxes) AS mailboxes,
       (SELECT COUNT(*) FROM contacts) AS contacts,
       (SELECT COUNT(*) FROM external_accounts) AS external_accounts,
+      (SELECT COUNT(*) FROM audit_log) AS audit_logs,
       (SELECT COUNT(*) FROM messages WHERE direction = 'inbound' AND archived_at IS NULL AND mailbox = ?) AS inbox,
       (SELECT COUNT(*) FROM messages WHERE direction = 'outbound' AND archived_at IS NULL AND from_address = ?) AS sent,
       (SELECT COUNT(*) FROM messages WHERE archived_at IS NOT NULL AND (mailbox = ? OR (direction = 'outbound' AND from_address = ?))) AS archive,
@@ -1118,7 +1129,21 @@ export async function getMailboxStats(env: RuntimeEnv, mailboxId: string | null)
     .bind(scopedAddress, scopedAddress, scopedAddress, scopedAddress, scopedAddress)
     .first<Record<string, number>>();
 
-  return rows ?? { domains: 0, mailboxes: 0, contacts: 0, external_accounts: 0, inbox: 0, sent: 0, archive: 0, unread: 0 };
+  return rows ?? defaultStats();
+}
+
+function defaultStats(): Record<string, number> {
+  return {
+    domains: 0,
+    mailboxes: 0,
+    contacts: 0,
+    external_accounts: 0,
+    audit_logs: 0,
+    inbox: 0,
+    sent: 0,
+    archive: 0,
+    unread: 0
+  };
 }
 
 function externalAccountIdFromMailboxScope(mailboxId: string): string | null {
@@ -1134,6 +1159,36 @@ export async function recordAudit(
   await env.DB.prepare("INSERT INTO audit_log (id, action, target, metadata_json) VALUES (?, ?, ?, ?)")
     .bind(createId("aud"), action, target, JSON.stringify(metadata))
     .run();
+}
+
+export async function listAuditLogs(
+  env: RuntimeEnv,
+  options: { limit?: number; query?: string } = {}
+): Promise<AuditLogRow[]> {
+  const limit = Math.min(Math.max(Math.trunc(options.limit ?? 250), 1), 500);
+  const query = options.query?.trim();
+
+  if (query) {
+    const like = `%${query}%`;
+    const result = await env.DB.prepare(
+      `SELECT * FROM audit_log
+       WHERE action LIKE ? OR target LIKE ? OR metadata_json LIKE ?
+       ORDER BY created_at DESC, id DESC
+       LIMIT ?`
+    )
+      .bind(like, like, like, limit)
+      .all<AuditLogRow>();
+    return result.results ?? [];
+  }
+
+  const result = await env.DB.prepare(
+    `SELECT * FROM audit_log
+     ORDER BY created_at DESC, id DESC
+     LIMIT ?`
+  )
+    .bind(limit)
+    .all<AuditLogRow>();
+  return result.results ?? [];
 }
 
 function isValidDomain(domain: string): boolean {

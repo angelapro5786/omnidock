@@ -28,6 +28,7 @@ import {
   importContacts,
   insertMessage,
   listContacts,
+  listAuditLogs,
   listDomains,
   listExternalAccounts,
   listThreadStorageKeys,
@@ -189,11 +190,20 @@ export async function handleApi(
       });
     }
 
+    if (url.pathname === "/api/audit-logs") {
+      if (request.method !== "GET") return methodNotAllowed();
+      const rawLimit = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
+      const limit = Number.isFinite(rawLimit) ? rawLimit : 250;
+      const query = url.searchParams.get("q") ?? undefined;
+      return json({ ok: true, logs: await listAuditLogs(env, { limit, query }) });
+    }
+
     if (url.pathname === "/api/auth/password") {
       if (request.method !== "PUT") return methodNotAllowed();
       const body = await readJson(request);
       const password = requiredString(body, "password", { min: 12, max: 256 });
       await setAdminPassword(env, password);
+      ctx.waitUntil(recordAudit(env, "admin.password_changed", "primary", {}));
       return json({ ok: true });
     }
 
@@ -234,6 +244,16 @@ export async function handleApi(
       }
 
       return methodNotAllowed();
+    }
+
+    if (url.pathname === "/api/sync/external/run") {
+      if (request.method !== "POST") return methodNotAllowed();
+      ctx.waitUntil(
+        runExternalSyncJobs(env, { maxDurationMs: EXTERNAL_SYNC_HTTP_BACKGROUND_MS }).catch((error) =>
+          console.error("Failed to resume external sync jobs", error)
+        )
+      );
+      return json({ ok: true, jobs: await listExternalSyncJobs(env) });
     }
 
     const defaultDomainMatch = url.pathname.match(/^\/api\/domains\/([^/]+)\/default$/);
@@ -654,8 +674,30 @@ export async function handleApi(
       { status: 404 }
     );
   } catch (error) {
+    ctx.waitUntil(recordApiFailure(env, request, error));
     return errorResponse(error);
   }
+}
+
+async function recordApiFailure(env: RuntimeEnv, request: Request, error: unknown): Promise<void> {
+  if (!env.DB) return;
+
+  const url = new URL(request.url);
+  if (url.pathname === "/api/health" || url.pathname === "/api/setup/status") return;
+
+  const status = error instanceof ApiError ? error.status : 500;
+  const code = error instanceof ApiError ? error.code : "internal_error";
+  const message = error instanceof Error ? error.message : "Unknown error";
+
+  await recordAudit(env, "api.failed", null, {
+    method: request.method,
+    path: url.pathname,
+    status,
+    code,
+    message: message.slice(0, 500)
+  }).catch((auditError) => {
+    console.error("Failed to write API failure audit log", auditError);
+  });
 }
 
 function requireD1Binding(env: RuntimeEnv): void {
