@@ -531,6 +531,8 @@ Before making your repository public:
 - Confirm docs/screenshots do not show private domains or real emails.
 - Confirm Cloudflare build variables use `OMNIDOCK_*` names.
 - Confirm the README uses the fork-first install flow and does not include a one-click deploy button.
+- Confirm `SECURITY.md`, `CONTRIBUTING.md`, `SUPPORT.md`, issue templates, PR template, and CI workflow are present.
+- Set GitHub repository description, website, topics, and social preview using [docs/GITHUB_SEO.md](docs/GITHUB_SEO.md).
 - Run `npm audit --audit-level=moderate`.
 - Run `npm run build`.
 

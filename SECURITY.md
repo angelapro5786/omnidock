@@ -62,9 +62,8 @@ Use `node tools/deploy-preserving-bindings.mjs` or `npm run deploy` for Git depl
 Before making a fork public, run:
 
 ```bash
-rg -n "api[_-]?token|password|secret|cloudflare_account_id|database_id|bucket_name|gmail|@|devfox|brix|ufuk" .
+rg -n "api[_-]?token|password|secret|cloudflare_account_id|database_id|bucket_name|gmail|@" .
 npm run build
 ```
 
 Review the output manually before publishing.
-
