@@ -18,6 +18,7 @@ import {
   deleteContact,
   deleteExternalAccount,
   deleteThread,
+  getExternalAccountById,
   getAttachmentById,
   getMailboxStats,
   getStats,
@@ -42,6 +43,7 @@ import {
   upsertDomain
 } from "./db";
 import { sendEmail } from "./email";
+import { syncExternalAccount } from "./external-sync";
 import {
   ApiError,
   RuntimeEnv,
@@ -303,6 +305,18 @@ export async function handleApi(
       }
 
       return methodNotAllowed();
+    }
+
+    const externalAccountSyncMatch = url.pathname.match(/^\/api\/external-accounts\/([^/]+)\/sync$/);
+    if (externalAccountSyncMatch) {
+      if (request.method !== "POST") return methodNotAllowed();
+      const account = await getExternalAccountById(env, externalAccountSyncMatch[1]);
+      if (!account) {
+        throw new ApiError(404, "external_account_not_found", "External account not found");
+      }
+      const limit = optionalLimit(url.searchParams.get("limit"));
+      const result = await syncExternalAccount(env, account, { limit });
+      return json({ ok: true, ...result });
     }
 
     if (url.pathname === "/api/mailboxes") {
@@ -1242,6 +1256,15 @@ function optionalPort(body: Record<string, unknown>, field: string): number | nu
     throw new ApiError(400, "invalid_port", `${field} is invalid`);
   }
   return port;
+}
+
+function optionalLimit(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 800) {
+    throw new ApiError(400, "invalid_limit", "limit must be between 1 and 800");
+  }
+  return parsed;
 }
 
 function readContactList(

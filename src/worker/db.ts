@@ -159,6 +159,7 @@ export type NewMessage = {
   error?: string | null;
   readAt?: string | null;
   receivedAt?: string | null;
+  createdAt?: string | null;
 };
 
 export function createId(prefix: string): string {
@@ -350,6 +351,21 @@ export async function deleteExternalAccount(env: RuntimeEnv, id: string): Promis
   if ((result.meta.changes ?? 0) === 0) {
     throw new ApiError(404, "external_account_not_found", "External account not found");
   }
+}
+
+export async function markExternalAccountChecked(
+  env: RuntimeEnv,
+  id: string,
+  status = "configured"
+): Promise<ExternalAccountRow | null> {
+  await env.DB.prepare(
+    `UPDATE external_accounts
+     SET status = ?, last_checked_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`
+  )
+    .bind(status, id)
+    .run();
+  return getExternalAccountById(env, id);
 }
 
 export async function upsertContact(
@@ -768,8 +784,8 @@ export async function insertMessage(env: RuntimeEnv, message: NewMessage): Promi
     `INSERT INTO messages (
       id, thread_id, direction, mailbox, domain, from_address, from_name, to_json, cc_json, bcc_json,
       subject, snippet, text_body, html_body, message_id, in_reply_to, references_header, raw_r2_key,
-      sent_status, sent_message_id, error, read_at, received_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      sent_status, sent_message_id, error, read_at, received_at, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       id,
@@ -794,7 +810,8 @@ export async function insertMessage(env: RuntimeEnv, message: NewMessage): Promi
       message.sentMessageId ?? null,
       message.error ?? null,
       message.readAt ?? null,
-      message.receivedAt ?? null
+      message.receivedAt ?? null,
+      message.createdAt ?? nowIso()
     )
     .run();
 
@@ -805,6 +822,13 @@ export async function insertMessage(env: RuntimeEnv, message: NewMessage): Promi
     throw new ApiError(500, "message_insert_failed", "Message could not be created");
   }
   return created;
+}
+
+export async function messageExistsByMessageId(env: RuntimeEnv, messageId: string): Promise<boolean> {
+  const row = await env.DB.prepare("SELECT id FROM messages WHERE message_id = ? LIMIT 1")
+    .bind(messageId)
+    .first<{ id: string }>();
+  return Boolean(row?.id);
 }
 
 export async function insertAttachment(

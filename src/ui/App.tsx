@@ -363,9 +363,14 @@ function AppContent() {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [composeOpen, setComposeOpen] = useState(false);
+  const externalSyncingIds = useRef<Set<string>>(new Set());
 
   const api = useMemo(() => (password ? new ApiClient(password) : null), [password]);
   const activePalette = palettes.find((item) => item.key === palette) ?? palettes[0];
+  const selectedExternalAccount = useMemo(
+    () => (bootstrap && selectedMailboxId ? externalAccountFromScope(selectedMailboxId, bootstrap.externalAccounts ?? []) : null),
+    [bootstrap, selectedMailboxId]
+  );
 
   useEffect(() => {
     document.documentElement.dataset.palette = palette;
@@ -518,6 +523,26 @@ function AppContent() {
       void loadThreads();
     }
   }, [api, bootstrap, folder, selectedMailboxId, view]);
+
+  useEffect(() => {
+    if (!api || !bootstrap || view !== "mail" || !selectedExternalAccount) return;
+    if (selectedExternalAccount.inbound_enabled !== 1 || selectedExternalAccount.last_checked_at) return;
+    if (externalSyncingIds.current.has(selectedExternalAccount.id)) return;
+
+    externalSyncingIds.current.add(selectedExternalAccount.id);
+    setNotice(`Syncing old emails for ${selectedExternalAccount.email}...`);
+    void syncExternalHistory(api, selectedExternalAccount.id)
+      .then(async (result) => {
+        await loadBootstrap();
+        await loadThreads({ preserveSelection: true });
+        const moreText = result.hasMore ? " More mail remains; OmniDock will continue on the next sync." : "";
+        setNotice(`External mail synced: ${result.imported} imported, ${result.skipped} skipped.${moreText}`);
+      })
+      .catch((error) => setNotice(readError(error)))
+      .finally(() => {
+        externalSyncingIds.current.delete(selectedExternalAccount.id);
+      });
+  }, [api, bootstrap, loadBootstrap, loadThreads, selectedExternalAccount, view]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -2715,7 +2740,15 @@ function ExternalAccountsView({
       );
       setSelectedId(result.account.id);
       await onChange();
-      onNotice("External account saved");
+      if (result.account.inbound_enabled === 1) {
+        onNotice(`External account saved. Syncing old emails for ${result.account.email}...`);
+        const sync = await syncExternalHistory(api, result.account.id);
+        await onChange();
+        const moreText = sync.hasMore ? " More mail remains; OmniDock will continue on the next sync." : "";
+        onNotice(`External mail synced: ${sync.imported} imported, ${sync.skipped} skipped.${moreText}`);
+      } else {
+        onNotice("External account saved");
+      }
     } catch (error) {
       onNotice(readError(error));
     } finally {
@@ -2971,6 +3004,29 @@ function externalProviderLabel(provider: string): string {
 
 function externalCredentialSecretName(email: string): string {
   return email.trim().toLowerCase();
+}
+
+async function syncExternalHistory(api: ApiClient, accountId: string): Promise<{
+  imported: number;
+  skipped: number;
+  checked: number;
+  hasMore: boolean;
+}> {
+  let imported = 0;
+  let skipped = 0;
+  let checked = 0;
+  let hasMore = false;
+
+  for (let round = 0; round < 4; round += 1) {
+    const result = await api.syncExternalAccount(accountId, 300);
+    imported += result.imported;
+    skipped += result.skipped;
+    checked += result.checked;
+    hasMore = result.hasMore;
+    if (!result.hasMore) break;
+  }
+
+  return { imported, skipped, checked, hasMore };
 }
 
 function OtherSettingsView({

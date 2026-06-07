@@ -178,6 +178,18 @@ export class ApiClient {
     });
   }
 
+  syncExternalAccount(id: string, limit = 300): Promise<{
+    ok: true;
+    imported: number;
+    skipped: number;
+    checked: number;
+    folders: string[];
+    hasMore: boolean;
+  }> {
+    const params = new URLSearchParams({ limit: String(limit) });
+    return this.request(`/api/external-accounts/${id}/sync?${params.toString()}`, { method: "POST" });
+  }
+
   deleteExternalAccount(id: string): Promise<unknown> {
     return this.request(`/api/external-accounts/${id}`, { method: "DELETE" });
   }
