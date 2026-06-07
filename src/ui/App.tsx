@@ -42,7 +42,7 @@ import {
   Users,
   X
 } from "lucide-react";
-import { createContext, FormEvent, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, FormEvent, MouseEvent as ReactMouseEvent, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   ApiClient,
   ApiRequestError,
@@ -3241,7 +3241,7 @@ function BucketsView({
             className={searchIncludesText ? "button mini active" : "button mini"}
             type="button"
             onClick={() => setSearchIncludesText((current) => !current)}
-            title="Search inside small text files"
+            title="Search inside small text files and searchable PDFs"
           >
             <FileText size={14} />
             Text
@@ -3327,7 +3327,7 @@ function BucketsView({
               {searchMeta ? (
                 <small>
                   {searchMeta.scanned} scanned
-                  {searchIncludesText ? ` · ${searchMeta.contentScanned} text files` : ""}
+                  {searchIncludesText ? ` · ${searchMeta.contentScanned} content files` : ""}
                   {searchMeta.truncated ? " · more available" : ""}
                 </small>
               ) : null}
@@ -3651,6 +3651,7 @@ function RichTextEditor({
   placeholder: string;
 }) {
   const editorRef = useRef<HTMLDivElement>(null);
+  const selectionRef = useRef<Range | null>(null);
   const [textColor, setTextColor] = useState("#111827");
   const [backgroundColor, setBackgroundColor] = useState("#fff3bf");
   const dialog = useAppDialog();
@@ -3675,16 +3676,71 @@ function RichTextEditor({
     });
   }
 
+  function selectionBelongsToEditor(range: Range | null): boolean {
+    const editor = editorRef.current;
+    if (!editor || !range) return false;
+    return editor.contains(range.commonAncestorContainer);
+  }
+
+  function saveSelection() {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+    const range = selection.getRangeAt(0).cloneRange();
+    if (selectionBelongsToEditor(range)) {
+      selectionRef.current = range;
+    }
+  }
+
+  function restoreSelection(): Range | null {
+    const editor = editorRef.current;
+    if (!editor) return null;
+    editor.focus();
+    const range = selectionRef.current;
+    if (!range || !selectionBelongsToEditor(range)) return null;
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    return range;
+  }
+
+  function normalizeCurrentEditor() {
+    const editor = editorRef.current;
+    if (!editor) return;
+    saveSelection();
+    const caretOffset = caretTextOffset(editor);
+    const text = editor.innerText.replace(/\u00a0/g, " ");
+    editor.innerHTML = sanitizeEmailHtml(autoLinkHtml(editor.innerHTML || textToHtmlWithLinks(text)));
+    if (caretOffset !== null) {
+      restoreCaretTextOffset(editor, caretOffset);
+    }
+    emitValue();
+    saveSelection();
+  }
+
   function runCommand(command: string, commandValue?: string) {
-    editorRef.current?.focus();
+    restoreSelection();
     document.execCommand(command, false, commandValue);
     emitValue();
+    saveSelection();
+  }
+
+  function runBackgroundColor(color: string) {
+    restoreSelection();
+    if (!document.execCommand("hiliteColor", false, color)) {
+      document.execCommand("backColor", false, color);
+    }
+    emitValue();
+    saveSelection();
+  }
+
+  function keepEditorSelection(event: ReactMouseEvent<HTMLElement>) {
+    event.preventDefault();
+    saveSelection();
   }
 
   async function addLink() {
-    const selection = window.getSelection();
-    const selectedText = selection?.toString().trim() ?? "";
-    const selectedRange = selection && selection.rangeCount > 0 ? selection.getRangeAt(0).cloneRange() : null;
+    const selectedRange = restoreSelection()?.cloneRange() ?? selectionRef.current?.cloneRange() ?? null;
+    const selectedText = selectedRange?.toString().trim() ?? "";
     const initialValue = selectedText && normalizeLinkHref(selectedText) ? selectedText : "https://";
     const input = await dialog.prompt({
       title: "Add link",
@@ -3695,27 +3751,120 @@ function RichTextEditor({
     });
     const href = normalizeLinkHref(input ?? "");
     if (!href) return;
-    if (selectedRange) {
-      const restoredSelection = window.getSelection();
-      restoredSelection?.removeAllRanges();
-      restoredSelection?.addRange(selectedRange);
+    applyLinkToSelection(href, selectedRange);
+    emitValue(true);
+    saveSelection();
+  }
+
+  function applyLinkToSelection(href: string, range: Range | null) {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const workingRange = range && selectionBelongsToEditor(range) ? range : document.createRange();
+    if (!range || !selectionBelongsToEditor(range)) {
+      workingRange.selectNodeContents(editor);
+      workingRange.collapse(false);
     }
-    runCommand("createLink", href);
+
+    const selectedLink = linkElementForRange(workingRange, editor);
+    if (selectedLink) {
+      selectedLink.href = href;
+      selectedLink.target = "_blank";
+      selectedLink.rel = "noopener noreferrer";
+      if (!selectedLink.textContent?.trim()) selectedLink.textContent = href;
+      placeCaretAfter(selectedLink);
+      return;
+    }
+
+    const link = document.createElement("a");
+    link.href = href;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+
+    if (workingRange.collapsed) {
+      link.textContent = href.replace(/^mailto:/, "");
+    } else {
+      link.appendChild(workingRange.extractContents());
+    }
+
+    workingRange.insertNode(link);
+    placeCaretAfter(link);
+  }
+
+  function placeCaretAfter(node: Node) {
+    const range = document.createRange();
+    range.setStartAfter(node);
+    range.collapse(true);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    selectionRef.current = range.cloneRange();
+  }
+
+  function linkElementForRange(range: Range, editor: HTMLElement): HTMLAnchorElement | null {
+    let node: Node | null = range.commonAncestorContainer;
+    if (node.nodeType === Node.TEXT_NODE) {
+      node = node.parentElement;
+    }
+    while (node && node !== editor) {
+      if (node instanceof HTMLAnchorElement) return node;
+      node = node.parentElement;
+    }
+    return null;
+  }
+
+  function caretTextOffset(editor: HTMLElement): number | null {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return null;
+    const range = selection.getRangeAt(0);
+    if (!range.collapsed || !editor.contains(range.commonAncestorContainer)) return null;
+    const before = range.cloneRange();
+    before.selectNodeContents(editor);
+    before.setEnd(range.endContainer, range.endOffset);
+    return before.toString().length;
+  }
+
+  function restoreCaretTextOffset(editor: HTMLElement, offset: number) {
+    const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+    let remaining = offset;
+    let node = walker.nextNode() as Text | null;
+
+    while (node) {
+      if (remaining <= node.data.length) {
+        const range = document.createRange();
+        range.setStart(node, remaining);
+        range.collapse(true);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+        selectionRef.current = range.cloneRange();
+        return;
+      }
+      remaining -= node.data.length;
+      node = walker.nextNode() as Text | null;
+    }
+
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    selectionRef.current = range.cloneRange();
   }
 
   return (
     <div className="rich-editor">
-      <div className="rich-toolbar" aria-label="Message formatting">
-        <button className="icon-button" type="button" onClick={() => runCommand("bold")} title="Bold">
+      <div className="rich-toolbar" aria-label="Message formatting" onMouseDown={saveSelection}>
+        <button className="icon-button" type="button" onMouseDown={keepEditorSelection} onClick={() => runCommand("bold")} title="Bold">
           <Bold size={15} />
         </button>
-        <button className="icon-button" type="button" onClick={() => runCommand("italic")} title="Italic">
+        <button className="icon-button" type="button" onMouseDown={keepEditorSelection} onClick={() => runCommand("italic")} title="Italic">
           <Italic size={15} />
         </button>
-        <button className="icon-button" type="button" onClick={() => runCommand("underline")} title="Underline">
+        <button className="icon-button" type="button" onMouseDown={keepEditorSelection} onClick={() => runCommand("underline")} title="Underline">
           <Underline size={15} />
         </button>
-        <label className="rich-color-button" title="Text color">
+        <label className="rich-color-button" title="Text color" onMouseDown={saveSelection}>
           <Type size={15} />
           <input
             type="color"
@@ -3726,18 +3875,18 @@ function RichTextEditor({
             }}
           />
         </label>
-        <label className="rich-color-button" title="Background color">
+        <label className="rich-color-button" title="Background color" onMouseDown={saveSelection}>
           <PaintBucket size={15} />
           <input
             type="color"
             value={backgroundColor}
             onChange={(event) => {
               setBackgroundColor(event.target.value);
-              runCommand("hiliteColor", event.target.value);
+              runBackgroundColor(event.target.value);
             }}
           />
         </label>
-        <button className="icon-button" type="button" onClick={() => void addLink()} title="Add link">
+        <button className="icon-button" type="button" onMouseDown={keepEditorSelection} onClick={() => void addLink()} title="Add link">
           <Link size={15} />
         </button>
       </div>
@@ -3746,7 +3895,17 @@ function RichTextEditor({
         contentEditable
         data-placeholder={placeholder}
         onBlur={() => emitValue(true)}
-        onInput={() => emitValue()}
+        onInput={() => {
+          emitValue();
+          saveSelection();
+        }}
+        onKeyUp={(event) => {
+          saveSelection();
+          if (event.key === " " || event.key === "Enter") {
+            normalizeCurrentEditor();
+          }
+        }}
+        onMouseUp={saveSelection}
         ref={editorRef}
         role="textbox"
         spellCheck

@@ -616,7 +616,7 @@ const reservedBucketDiscoveryBindings = new Set(["ASSETS", "DB", "EMAIL"]);
 const MAX_BUCKET_SEARCH_RESULTS = 100;
 const MAX_BUCKET_SEARCH_SCAN = 1200;
 const MAX_BUCKET_TEXT_SEARCH_FILES = 80;
-const MAX_BUCKET_TEXT_SEARCH_BYTES = 512 * 1024;
+const MAX_BUCKET_TEXT_SEARCH_BYTES = 2 * 1024 * 1024;
 
 function listAvailableBuckets(env: RuntimeEnv): BucketInfo[] {
   const configured = Boolean(env.MAIL_BUCKET);
@@ -767,7 +767,7 @@ async function searchBucketObjects(env: RuntimeEnv, url: URL) {
           isTextSearchCandidate(object)
         ) {
           contentScanned += 1;
-          contentSnippet = await findTextMatch(bucket.bucket, object.key, normalizedQuery);
+          contentSnippet = await findTextMatch(bucket.bucket, object, normalizedQuery);
         }
 
         if (pathMatches || contentSnippet) {
@@ -810,10 +810,13 @@ async function searchBucketObjects(env: RuntimeEnv, url: URL) {
   };
 }
 
-async function findTextMatch(bucket: R2Bucket, key: string, normalizedQuery: string): Promise<string | null> {
-  const object = await bucket.get(key);
-  if (!object) return null;
-  const text = await object.text();
+async function findTextMatch(bucket: R2Bucket, object: R2Object, normalizedQuery: string): Promise<string | null> {
+  const body = await bucket.get(object.key);
+  if (!body) return null;
+  const text = isPdfSearchCandidate(object)
+    ? await extractPdfText(await body.arrayBuffer())
+    : await body.text();
+  if (!text.trim()) return null;
   const normalizedText = normalizeSearchText(text);
   const index = normalizedText.indexOf(normalizedQuery);
   if (index < 0) return null;
@@ -837,7 +840,210 @@ function isTextSearchCandidate(object: R2Object): boolean {
   const contentType = object.httpMetadata?.contentType?.toLowerCase() ?? "";
   const filename = object.key.toLowerCase();
   const textExtensions = [".txt", ".md", ".csv", ".json", ".log", ".xml", ".html", ".css", ".js", ".ts", ".tsx", ".yml", ".yaml"];
-  return contentType.startsWith("text/") || contentType.includes("json") || textExtensions.some((extension) => filename.endsWith(extension));
+  return (
+    isPdfSearchCandidate(object) ||
+    contentType.startsWith("text/") ||
+    contentType.includes("json") ||
+    textExtensions.some((extension) => filename.endsWith(extension))
+  );
+}
+
+function isPdfSearchCandidate(object: R2Object): boolean {
+  const contentType = object.httpMetadata?.contentType?.toLowerCase() ?? "";
+  return contentType === "application/pdf" || object.key.toLowerCase().endsWith(".pdf");
+}
+
+async function extractPdfText(buffer: ArrayBuffer): Promise<string> {
+  const bytes = new Uint8Array(buffer);
+  const raw = decodePdfBytes(bytes);
+  const chunks = [raw];
+
+  for (const stream of await extractPdfStreams(bytes, raw)) {
+    chunks.push(decodePdfBytes(stream));
+  }
+
+  return extractPdfOperatorText(chunks.join("\n"));
+}
+
+async function extractPdfStreams(bytes: Uint8Array, raw: string): Promise<Uint8Array[]> {
+  const streams: Uint8Array[] = [];
+  let offset = 0;
+
+  while (offset < raw.length) {
+    const streamIndex = raw.indexOf("stream", offset);
+    if (streamIndex < 0) break;
+    const endIndex = raw.indexOf("endstream", streamIndex + 6);
+    if (endIndex < 0) break;
+
+    let dataStart = streamIndex + 6;
+    if (raw[dataStart] === "\r" && raw[dataStart + 1] === "\n") {
+      dataStart += 2;
+    } else if (raw[dataStart] === "\n" || raw[dataStart] === "\r") {
+      dataStart += 1;
+    }
+
+    let dataEnd = endIndex;
+    while (dataEnd > dataStart && (raw[dataEnd - 1] === "\n" || raw[dataEnd - 1] === "\r")) {
+      dataEnd -= 1;
+    }
+
+    const dictionary = raw.slice(Math.max(0, streamIndex - 500), streamIndex);
+    const streamBytes = bytes.slice(dataStart, dataEnd);
+    if (/\/Filter\s*(?:\/FlateDecode|\[[^\]]*\/FlateDecode)/.test(dictionary)) {
+      const inflated = await inflatePdfStream(streamBytes);
+      if (inflated) streams.push(inflated);
+    } else {
+      streams.push(streamBytes);
+    }
+
+    offset = endIndex + 9;
+  }
+
+  return streams;
+}
+
+async function inflatePdfStream(bytes: Uint8Array): Promise<Uint8Array | null> {
+  if (typeof DecompressionStream === "undefined") return null;
+  try {
+    const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    const stream = new Blob([buffer]).stream().pipeThrough(new DecompressionStream("deflate"));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+
+function extractPdfOperatorText(source: string): string {
+  const parts: string[] = [];
+
+  for (const match of source.matchAll(/\[((?:.|\n|\r)*?)\]\s*TJ/g)) {
+    parts.push(...extractPdfStrings(match[1]));
+  }
+
+  for (const match of source.matchAll(/(\((?:\\.|[^\\()])*\)|<[\dA-Fa-f\s]+>)\s*(?:Tj|'|")/g)) {
+    parts.push(decodePdfTokenString(match[1]));
+  }
+
+  const text = parts
+    .map((part) => part.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .join(" ");
+
+  return text || source.replace(/[^\p{L}\p{N}\s.,;:!?@/#%&()[\]{}_-]+/gu, " ");
+}
+
+function extractPdfStrings(value: string): string[] {
+  const strings: string[] = [];
+  for (const match of value.matchAll(/\((?:\\.|[^\\()])*\)|<[\dA-Fa-f\s]+>/g)) {
+    strings.push(decodePdfTokenString(match[0]));
+  }
+  return strings;
+}
+
+function decodePdfTokenString(token: string): string {
+  if (token.startsWith("<")) {
+    return decodePdfHexString(token);
+  }
+  return decodePdfLiteralString(token);
+}
+
+function decodePdfLiteralString(token: string): string {
+  const content = token.slice(1, -1);
+  const bytes: number[] = [];
+
+  for (let index = 0; index < content.length; index += 1) {
+    const char = content[index];
+    if (char !== "\\") {
+      bytes.push(content.charCodeAt(index) & 0xff);
+      continue;
+    }
+
+    const next = content[index + 1];
+    if (!next) break;
+    if (/[0-7]/.test(next)) {
+      const octal = content.slice(index + 1).match(/^[0-7]{1,3}/)?.[0] ?? next;
+      bytes.push(Number.parseInt(octal, 8) & 0xff);
+      index += octal.length;
+      continue;
+    }
+
+    const escapeMap: Record<string, number | null> = {
+      n: 10,
+      r: 13,
+      t: 9,
+      b: 8,
+      f: 12,
+      "(": 40,
+      ")": 41,
+      "\\": 92,
+      "\n": null,
+      "\r": null
+    };
+    const mapped = escapeMap[next];
+    if (mapped !== undefined) {
+      if (mapped !== null) bytes.push(mapped);
+      if (next === "\r" && content[index + 2] === "\n") index += 1;
+      index += 1;
+      continue;
+    }
+
+    bytes.push(next.charCodeAt(0) & 0xff);
+    index += 1;
+  }
+
+  return decodePdfStringBytes(new Uint8Array(bytes));
+}
+
+function decodePdfHexString(token: string): string {
+  const hex = token.slice(1, -1).replace(/\s+/g, "");
+  const bytes = new Uint8Array(Math.ceil(hex.length / 2));
+  for (let index = 0; index < bytes.length; index += 1) {
+    bytes[index] = Number.parseInt(hex.slice(index * 2, index * 2 + 2).padEnd(2, "0"), 16);
+  }
+  return decodePdfStringBytes(bytes);
+}
+
+function decodePdfStringBytes(bytes: Uint8Array): string {
+  if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
+    return decodeUtf16Bytes(bytes.slice(2), false);
+  }
+  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
+    return decodeUtf16Bytes(bytes.slice(2), true);
+  }
+  if (looksLikeUtf16Be(bytes)) {
+    return decodeUtf16Bytes(bytes, false);
+  }
+
+  const utf8 = new TextDecoder("utf-8").decode(bytes);
+  return utf8.includes("\ufffd") ? decodePdfBytes(bytes) : utf8;
+}
+
+function decodeUtf16Bytes(bytes: Uint8Array, littleEndian: boolean): string {
+  let output = "";
+  for (let index = 0; index + 1 < bytes.length; index += 2) {
+    const code = littleEndian ? bytes[index] | (bytes[index + 1] << 8) : (bytes[index] << 8) | bytes[index + 1];
+    output += String.fromCharCode(code);
+  }
+  return output;
+}
+
+function looksLikeUtf16Be(bytes: Uint8Array): boolean {
+  if (bytes.length < 4 || bytes.length % 2 !== 0) return false;
+  let zeroHighBytes = 0;
+  const pairs = Math.min(24, bytes.length / 2);
+  for (let index = 0; index < pairs * 2; index += 2) {
+    if (bytes[index] === 0) zeroHighBytes += 1;
+  }
+  return zeroHighBytes >= Math.ceil(pairs * 0.6);
+}
+
+function decodePdfBytes(bytes: Uint8Array): string {
+  let output = "";
+  const chunkSize = 8192;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    output += String.fromCharCode(...bytes.slice(index, index + chunkSize));
+  }
+  return output;
 }
 
 function runtimeBucketName(env: RuntimeEnv): string {
