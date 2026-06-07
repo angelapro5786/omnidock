@@ -1,5 +1,6 @@
 import { handleApi } from "./api";
 import { receiveEmail } from "./email";
+import { EXTERNAL_SYNC_MAX_RUN_MS, runExternalSyncJobs } from "./external-sync";
 import { RuntimeEnv, json, withSecurityHeaders } from "./http";
 
 export default {
@@ -33,6 +34,15 @@ export default {
       console.error("Failed to receive email", error);
       message.setReject("OmniDock could not accept this message");
     }
+  },
+
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    const runtimeEnv = env as RuntimeEnv;
+    ctx.waitUntil(
+      runExternalSyncJobs(runtimeEnv, { maxDurationMs: EXTERNAL_SYNC_MAX_RUN_MS }).catch((error) => {
+        console.error("Failed to run external sync jobs", error);
+      })
+    );
   }
 } satisfies ExportedHandler<Env>;
 

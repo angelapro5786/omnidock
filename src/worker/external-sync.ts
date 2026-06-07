@@ -4,8 +4,10 @@ import {
   createId,
   domainFromEmail,
   findThreadForHeaders,
+  getExternalAccountById,
   insertAttachment,
   insertMessage,
+  listExternalAccounts,
   markExternalAccountChecked,
   messageExistsByMessageId,
   normalizeEmail,
@@ -18,6 +20,8 @@ import { ensureDatabaseSchema } from "./schema";
 
 type SyncOptions = {
   limit?: number;
+  cursor?: ExternalSyncCursor;
+  maxDurationMs?: number;
 };
 
 export type ExternalSyncResult = {
@@ -26,6 +30,51 @@ export type ExternalSyncResult = {
   checked: number;
   folders: string[];
   hasMore: boolean;
+};
+
+export type ExternalSyncJobStatus = "queued" | "running" | "complete" | "failed";
+
+export type ExternalSyncJobRow = {
+  account_id: string;
+  status: ExternalSyncJobStatus;
+  folders_json: string;
+  folder_index: number;
+  next_uid_exclusive: number | null;
+  imported: number;
+  skipped: number;
+  checked: number;
+  run_count: number;
+  has_more: number;
+  message: string | null;
+  last_error: string | null;
+  lease_until: string | null;
+  started_at: string;
+  updated_at: string;
+  completed_at: string | null;
+};
+
+export type ExternalSyncJobRunResult = {
+  ok: true;
+  started: number;
+  completed: number;
+  failed: number;
+  imported: number;
+  skipped: number;
+  checked: number;
+  hasMore: boolean;
+  jobs: ExternalSyncJobRow[];
+};
+
+type ExternalSyncCursor = {
+  folders: string[];
+  folderIndex: number;
+  nextUidExclusive: number | null;
+};
+
+type ExternalSyncBatchResult = ExternalSyncResult & {
+  cursor: ExternalSyncCursor;
+  complete: boolean;
+  timedOut: boolean;
 };
 
 type ParsedAddress = {
@@ -41,14 +90,158 @@ type ImapFolder = {
 const DEFAULT_SYNC_LIMIT = 300;
 const MAX_SYNC_LIMIT = 800;
 const SYNC_TIME_BUDGET_MS = 22_000;
+export const EXTERNAL_SYNC_HTTP_BACKGROUND_MS = 25_000;
+export const EXTERNAL_SYNC_MAX_RUN_MS = 15 * 60 * 1000;
+const EXTERNAL_SYNC_SAFETY_MS = 3_000;
 
 export async function syncExternalAccount(
   env: RuntimeEnv,
   account: ExternalAccountRow,
   options: SyncOptions = {}
 ): Promise<ExternalSyncResult> {
-  await ensureDatabaseSchema(env);
+  const result = await syncExternalAccountBatch(env, account, {
+    ...options,
+    maxDurationMs: options.maxDurationMs ?? SYNC_TIME_BUDGET_MS
+  });
+  await markExternalAccountChecked(env, account.id, "configured");
+  await recordAudit(env, "external_account.synced", account.id, {
+    email: account.email,
+    imported: result.imported,
+    skipped: result.skipped,
+    checked: result.checked,
+    hasMore: result.hasMore
+  });
 
+  return {
+    imported: result.imported,
+    skipped: result.skipped,
+    checked: result.checked,
+    folders: result.folders,
+    hasMore: result.hasMore
+  };
+}
+
+export async function listExternalSyncJobs(env: RuntimeEnv): Promise<ExternalSyncJobRow[]> {
+  await ensureDatabaseSchema(env);
+  const result = await env.DB.prepare(
+    "SELECT * FROM external_sync_jobs ORDER BY updated_at DESC LIMIT 200"
+  ).all<ExternalSyncJobRow>();
+  return result.results ?? [];
+}
+
+export async function getExternalSyncJob(env: RuntimeEnv, accountId: string): Promise<ExternalSyncJobRow | null> {
+  await ensureDatabaseSchema(env);
+  return (
+    (await env.DB.prepare("SELECT * FROM external_sync_jobs WHERE account_id = ?")
+      .bind(accountId)
+      .first<ExternalSyncJobRow>()) ?? null
+  );
+}
+
+export async function queueExternalSyncJob(env: RuntimeEnv, account: ExternalAccountRow): Promise<ExternalSyncJobRow> {
+  await ensureDatabaseSchema(env);
+  if (account.inbound_enabled !== 1) {
+    throw new ApiError(400, "external_inbound_disabled", "Inbound sync is disabled for this external account");
+  }
+
+  const now = nowIso();
+  await env.DB.prepare(
+    `INSERT INTO external_sync_jobs (
+      account_id, status, folders_json, folder_index, next_uid_exclusive,
+      imported, skipped, checked, run_count, has_more, message, last_error,
+      lease_until, started_at, updated_at, completed_at
+    ) VALUES (?, 'queued', '[]', 0, NULL, 0, 0, 0, 0, 1, ?, NULL, NULL, ?, ?, NULL)
+    ON CONFLICT(account_id) DO UPDATE SET
+      status = CASE
+        WHEN external_sync_jobs.status = 'running'
+          AND external_sync_jobs.lease_until IS NOT NULL
+          AND external_sync_jobs.lease_until > excluded.updated_at
+        THEN external_sync_jobs.status
+        ELSE 'queued'
+      END,
+      folders_json = CASE WHEN external_sync_jobs.status IN ('complete', 'failed') THEN '[]' ELSE external_sync_jobs.folders_json END,
+      folder_index = CASE WHEN external_sync_jobs.status IN ('complete', 'failed') THEN 0 ELSE external_sync_jobs.folder_index END,
+      next_uid_exclusive = CASE WHEN external_sync_jobs.status IN ('complete', 'failed') THEN NULL ELSE external_sync_jobs.next_uid_exclusive END,
+      imported = CASE WHEN external_sync_jobs.status IN ('complete', 'failed') THEN 0 ELSE external_sync_jobs.imported END,
+      skipped = CASE WHEN external_sync_jobs.status IN ('complete', 'failed') THEN 0 ELSE external_sync_jobs.skipped END,
+      checked = CASE WHEN external_sync_jobs.status IN ('complete', 'failed') THEN 0 ELSE external_sync_jobs.checked END,
+      has_more = 1,
+      message = excluded.message,
+      last_error = NULL,
+      updated_at = excluded.updated_at,
+      completed_at = NULL`
+  )
+    .bind(account.id, `Queued ${account.email}`, now, now)
+    .run();
+
+  const job = await getExternalSyncJob(env, account.id);
+  if (!job) {
+    throw new ApiError(500, "external_sync_queue_failed", "External sync job could not be queued");
+  }
+  return job;
+}
+
+export async function queueAllExternalSyncJobs(env: RuntimeEnv): Promise<ExternalSyncJobRow[]> {
+  const accounts = (await listExternalAccounts(env)).filter((account) => account.inbound_enabled === 1);
+  const jobs: ExternalSyncJobRow[] = [];
+  for (const account of accounts) {
+    jobs.push(await queueExternalSyncJob(env, account));
+  }
+  return jobs;
+}
+
+export async function runExternalSyncJobs(
+  env: RuntimeEnv,
+  options: { accountId?: string; maxDurationMs?: number } = {}
+): Promise<ExternalSyncJobRunResult> {
+  await ensureDatabaseSchema(env);
+  const maxDurationMs = Math.min(Math.max(options.maxDurationMs ?? EXTERNAL_SYNC_HTTP_BACKGROUND_MS, 5_000), EXTERNAL_SYNC_MAX_RUN_MS);
+  const deadline = Date.now() + maxDurationMs - EXTERNAL_SYNC_SAFETY_MS;
+  let started = 0;
+  let completed = 0;
+  let failed = 0;
+  let imported = 0;
+  let skipped = 0;
+  let checked = 0;
+  let hasMore = false;
+
+  while (Date.now() < deadline) {
+    const job = await nextRunnableExternalSyncJob(env, options.accountId);
+    if (!job) break;
+
+    const account = await getExternalAccountById(env, job.account_id);
+    if (!account) {
+      await failExternalSyncJob(env, job.account_id, "External account no longer exists");
+      failed += 1;
+      continue;
+    }
+
+    started += 1;
+    const result = await runExternalSyncJob(env, account, job, Math.max(5_000, deadline - Date.now()));
+    imported += result.imported;
+    skipped += result.skipped;
+    checked += result.checked;
+    if (result.complete) {
+      completed += 1;
+    } else if (result.failed) {
+      failed += 1;
+    } else {
+      hasMore = true;
+    }
+
+    if (options.accountId && (result.complete || result.failed || Date.now() >= deadline)) break;
+  }
+
+  const jobs = await listExternalSyncJobs(env);
+  return { ok: true, started, completed, failed, imported, skipped, checked, hasMore, jobs };
+}
+
+async function syncExternalAccountBatch(
+  env: RuntimeEnv,
+  account: ExternalAccountRow,
+  options: SyncOptions = {}
+): Promise<ExternalSyncBatchResult> {
+  await ensureDatabaseSchema(env);
   if (account.inbound_enabled !== 1) {
     throw new ApiError(400, "external_inbound_disabled", "Inbound sync is disabled for this external account");
   }
@@ -61,12 +254,16 @@ export async function syncExternalAccount(
 
   const password = externalCredential(env, account);
   const startedAt = Date.now();
+  const maxDurationMs = Math.min(Math.max(options.maxDurationMs ?? SYNC_TIME_BUDGET_MS, 1_000), EXTERNAL_SYNC_MAX_RUN_MS);
   const limit = Math.min(Math.max(options.limit ?? DEFAULT_SYNC_LIMIT, 1), MAX_SYNC_LIMIT);
-  let folders = externalSyncFolders(account.provider);
+  let folders = options.cursor?.folders.length ? options.cursor.folders : externalSyncFolders(account.provider);
+  let folderIndex = Math.max(0, options.cursor?.folderIndex ?? 0);
+  let nextUidExclusive = options.cursor?.nextUidExclusive ?? null;
   let imported = 0;
   let skipped = 0;
   let checked = 0;
   let hasMore = false;
+  let timedOut = false;
 
   const imap = await ImapClient.open({
     host: account.imap_host,
@@ -76,19 +273,28 @@ export async function syncExternalAccount(
 
   try {
     await imap.login(account.username || account.email, password);
-    folders = externalSyncFolders(account.provider, await imap.listFolders());
+    if (!options.cursor?.folders.length) {
+      folders = externalSyncFolders(account.provider, await imap.listFolders());
+    }
 
-    for (const folder of folders) {
+    for (; folderIndex < folders.length; folderIndex += 1) {
+      const folder = folders[folderIndex];
       const selected = await imap.examine(folder);
-      if (!selected) continue;
+      if (!selected) {
+        nextUidExclusive = null;
+        continue;
+      }
 
       const uids = await imap.searchAll();
-      const newestFirst = [...uids].sort((a, b) => b - a);
+      const newestFirst = [...uids]
+        .sort((a, b) => b - a)
+        .filter((uid) => nextUidExclusive === null || uid < nextUidExclusive);
       const sentFolder = isSentFolder(folder);
 
       for (const uid of newestFirst) {
-        if (imported >= limit || Date.now() - startedAt > SYNC_TIME_BUDGET_MS) {
+        if (imported + skipped >= limit || Date.now() - startedAt > maxDurationMs) {
           hasMore = true;
+          timedOut = Date.now() - startedAt > maxDurationMs;
           break;
         }
 
@@ -105,18 +311,187 @@ export async function syncExternalAccount(
         } else {
           skipped += 1;
         }
+        nextUidExclusive = uid;
       }
 
       if (hasMore) break;
+      nextUidExclusive = null;
     }
   } finally {
     await imap.logout();
   }
 
-  await markExternalAccountChecked(env, account.id, "configured");
-  await recordAudit(env, "external_account.synced", account.id, { email: account.email, imported, skipped, checked });
+  const complete = !hasMore && folderIndex >= folders.length;
 
-  return { imported, skipped, checked, folders, hasMore };
+  return {
+    imported,
+    skipped,
+    checked,
+    folders,
+    hasMore,
+    complete,
+    timedOut,
+    cursor: {
+      folders,
+      folderIndex,
+      nextUidExclusive
+    }
+  };
+}
+
+async function nextRunnableExternalSyncJob(env: RuntimeEnv, accountId?: string): Promise<ExternalSyncJobRow | null> {
+  const now = nowIso();
+  const baseWhere = `status = 'queued' OR (status = 'running' AND (lease_until IS NULL OR lease_until < ?))`;
+  if (accountId) {
+    return (
+      (await env.DB.prepare(
+        `SELECT * FROM external_sync_jobs
+         WHERE account_id = ? AND (${baseWhere})
+         ORDER BY updated_at ASC
+         LIMIT 1`
+      )
+        .bind(accountId, now)
+        .first<ExternalSyncJobRow>()) ?? null
+    );
+  }
+
+  return (
+    (await env.DB.prepare(
+      `SELECT * FROM external_sync_jobs
+       WHERE ${baseWhere}
+       ORDER BY updated_at ASC
+       LIMIT 1`
+    )
+      .bind(now)
+      .first<ExternalSyncJobRow>()) ?? null
+  );
+}
+
+async function runExternalSyncJob(
+  env: RuntimeEnv,
+  account: ExternalAccountRow,
+  job: ExternalSyncJobRow,
+  maxDurationMs: number
+): Promise<ExternalSyncBatchResult & { failed: boolean }> {
+  const leaseUntil = new Date(Date.now() + Math.min(maxDurationMs + EXTERNAL_SYNC_SAFETY_MS, EXTERNAL_SYNC_MAX_RUN_MS)).toISOString();
+  await env.DB.prepare(
+    `UPDATE external_sync_jobs
+     SET status = 'running',
+         lease_until = ?,
+         run_count = run_count + 1,
+         message = ?,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE account_id = ?`
+  )
+    .bind(leaseUntil, `Pulling ${account.email}`, job.account_id)
+    .run();
+
+  try {
+    const latest = (await getExternalSyncJob(env, job.account_id)) ?? job;
+    const result = await syncExternalAccountBatch(env, account, {
+      limit: MAX_SYNC_LIMIT,
+      maxDurationMs,
+      cursor: cursorFromJob(latest)
+    });
+    await markExternalAccountChecked(env, account.id, "configured");
+
+    const nextStatus: ExternalSyncJobStatus = result.complete ? "complete" : "queued";
+    const message = result.complete
+      ? `Done: ${latest.imported + result.imported} imported, ${latest.skipped + result.skipped} skipped`
+      : result.timedOut
+        ? "15 minute sync window reached. Run Sync again to continue remaining mail."
+        : `Still pulling: ${latest.imported + result.imported} imported, ${latest.skipped + result.skipped} skipped`;
+
+    await env.DB.prepare(
+      `UPDATE external_sync_jobs
+       SET status = ?,
+           folders_json = ?,
+           folder_index = ?,
+           next_uid_exclusive = ?,
+           imported = imported + ?,
+           skipped = skipped + ?,
+           checked = checked + ?,
+           has_more = ?,
+           message = ?,
+           last_error = NULL,
+           lease_until = NULL,
+           updated_at = CURRENT_TIMESTAMP,
+           completed_at = CASE WHEN ? = 'complete' THEN CURRENT_TIMESTAMP ELSE NULL END
+       WHERE account_id = ?`
+    )
+      .bind(
+        nextStatus,
+        JSON.stringify(result.cursor.folders),
+        result.cursor.folderIndex,
+        result.cursor.nextUidExclusive,
+        result.imported,
+        result.skipped,
+        result.checked,
+        result.hasMore ? 1 : 0,
+        message,
+        nextStatus,
+        account.id
+      )
+      .run();
+
+    await recordAudit(env, "external_account.sync_batch", account.id, {
+      email: account.email,
+      imported: result.imported,
+      skipped: result.skipped,
+      checked: result.checked,
+      complete: result.complete,
+      timedOut: result.timedOut
+    });
+
+    return { ...result, failed: false };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "External sync failed";
+    await failExternalSyncJob(env, account.id, message);
+    await recordAudit(env, "external_account.sync_failed", account.id, { email: account.email, message });
+    return {
+      imported: 0,
+      skipped: 0,
+      checked: 0,
+      folders: cursorFromJob(job).folders,
+      hasMore: false,
+      complete: false,
+      timedOut: false,
+      failed: true,
+      cursor: cursorFromJob(job)
+    };
+  }
+}
+
+async function failExternalSyncJob(env: RuntimeEnv, accountId: string, message: string): Promise<void> {
+  await env.DB.prepare(
+    `UPDATE external_sync_jobs
+     SET status = 'failed',
+         has_more = 0,
+         message = ?,
+         last_error = ?,
+         lease_until = NULL,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE account_id = ?`
+  )
+    .bind(message, message, accountId)
+    .run();
+}
+
+function cursorFromJob(job: ExternalSyncJobRow): ExternalSyncCursor {
+  return {
+    folders: parseFolders(job.folders_json),
+    folderIndex: Math.max(0, job.folder_index || 0),
+    nextUidExclusive: job.next_uid_exclusive ?? null
+  };
+}
+
+function parseFolders(value: string): string[] {
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string" && item.length > 0) : [];
+  } catch {
+    return [];
+  }
 }
 
 async function storeExternalRawMessage(

@@ -911,6 +911,14 @@ button:hover:not(:disabled) {
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
+.app-dialog-textarea {
+  min-height: 190px;
+  height: auto;
+  padding: 10px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
 .check-row {
   display: flex;
   align-items: center;
@@ -1393,9 +1401,28 @@ button:hover:not(:disabled) {
 
 .bucket-preview-body {
   display: grid;
+  gap: 8px;
+  align-content: start;
   min-height: 0;
   padding: 10px;
   background: var(--panel-alt);
+}
+
+.bucket-index-note {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--info-line);
+  border-radius: var(--radius);
+  background: var(--info-soft);
+  color: var(--info);
+  font: 12px/1.35 var(--mono);
+}
+
+.bucket-index-note svg {
+  flex: 0 0 auto;
 }
 
 .bucket-preview-body .preview-loading,

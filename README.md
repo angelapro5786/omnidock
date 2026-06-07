@@ -22,7 +22,7 @@ Website: [omnidock.org](https://omnidock.org)
 - Import contacts manually or from CSV, TXT, and VCF files; edit contacts one by one; store phone, company, tags, and notes.
 - Manage mailbox-specific rich signatures with text style and links.
 - Add external account profiles for Gmail, Outlook, Yahoo, iCloud, or custom IMAP/SMTP settings. OmniDock stores the Worker secret name, not the credential value.
-- Browse one or more configured R2 buckets from the sidebar, open folders, preview objects, upload files, download files, and delete files.
+- Browse one or more configured R2 buckets from the sidebar, open folders, preview objects, upload files, download files, delete files, and save searchable text indexes for scanned documents without automatic AI spend.
 - Choose between five UI palettes: Linux, Ubuntu, Fedora, Plasma, and Graphite.
 - Set a default mailbox and customize automatic refresh timing.
 
@@ -282,6 +282,8 @@ Other Settings controls automatic refresh. The default is 10 seconds and can be 
 ### Buckets
 
 The Buckets sidebar opens a dropdown of configured R2 buckets. `MAIL_BUCKET` is always the primary mail bucket. Extra buckets from `OMNIDOCK_EXTRA_R2_BUCKETS` appear in the same dropdown with their real bucket names. You can browse folder prefixes, preview supported file types, upload files, download objects, and delete objects.
+
+Bucket search reads filenames, paths, supported text files, extractable PDF text, and saved object text indexes. Scanned PDFs and images do not contain searchable text by default. To avoid surprise AI costs, OmniDock does not run automatic OCR during every search. Open an object, choose `Index text`, and paste OCR text from your preferred local or external OCR tool. OmniDock stores that text in D1 and future searches find the object without re-running OCR.
 
 ## Custom Domain
 

@@ -2,9 +2,11 @@ import {
   BootstrapPayload,
   BucketObjectsPayload,
   BucketSearchPayload,
+  BucketTextIndexPayload,
   ContactRow,
   DomainRow,
   ExternalAccountRow,
+  ExternalSyncJobRow,
   SetupStatusPayload,
   ThreadPayload,
   ThreadRow
@@ -178,16 +180,20 @@ export class ApiClient {
     });
   }
 
-  syncExternalAccount(id: string, limit = 300): Promise<{
+  syncExternalAccount(id: string): Promise<{
     ok: true;
-    imported: number;
-    skipped: number;
-    checked: number;
-    folders: string[];
-    hasMore: boolean;
+    queued: number;
+    job: ExternalSyncJobRow;
   }> {
-    const params = new URLSearchParams({ limit: String(limit) });
-    return this.request(`/api/external-accounts/${id}/sync?${params.toString()}`, { method: "POST" });
+    return this.request(`/api/external-accounts/${id}/sync`, { method: "POST" });
+  }
+
+  startExternalSync(): Promise<{ ok: true; queued: number; jobs: ExternalSyncJobRow[] }> {
+    return this.request("/api/sync/external", { method: "POST" });
+  }
+
+  externalSyncJobs(): Promise<{ ok: true; jobs: ExternalSyncJobRow[] }> {
+    return this.request("/api/sync/external");
   }
 
   deleteExternalAccount(id: string): Promise<unknown> {
@@ -295,6 +301,23 @@ export class ApiClient {
       }
     });
     return readApiResponse(response);
+  }
+
+  getBucketObjectTextIndex(bucketId: string, key: string): Promise<BucketTextIndexPayload> {
+    return this.request<BucketTextIndexPayload>(`/api/buckets/${encodeURIComponent(bucketId)}/object-text?key=${encodeURIComponent(key)}`);
+  }
+
+  saveBucketObjectTextIndex(bucketId: string, key: string, text: string, source = "manual"): Promise<BucketTextIndexPayload> {
+    return this.request<BucketTextIndexPayload>(`/api/buckets/${encodeURIComponent(bucketId)}/object-text?key=${encodeURIComponent(key)}`, {
+      method: "PUT",
+      body: JSON.stringify({ text, source })
+    });
+  }
+
+  deleteBucketObjectTextIndex(bucketId: string, key: string): Promise<unknown> {
+    return this.request(`/api/buckets/${encodeURIComponent(bucketId)}/object-text?key=${encodeURIComponent(key)}`, {
+      method: "DELETE"
+    });
   }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {

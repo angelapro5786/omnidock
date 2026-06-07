@@ -18,6 +18,7 @@ import {
   deleteContact,
   deleteExternalAccount,
   deleteThread,
+  createId,
   getExternalAccountById,
   getAttachmentById,
   getMailboxStats,
@@ -43,7 +44,14 @@ import {
   upsertDomain
 } from "./db";
 import { sendEmail } from "./email";
-import { syncExternalAccount } from "./external-sync";
+import {
+  EXTERNAL_SYNC_HTTP_BACKGROUND_MS,
+  listExternalSyncJobs,
+  queueAllExternalSyncJobs,
+  queueExternalSyncJob,
+  runExternalSyncJobs,
+  syncExternalAccount
+} from "./external-sync";
 import {
   ApiError,
   RuntimeEnv,
@@ -210,6 +218,24 @@ export async function handleApi(
       return json({ ok: true, ...result });
     }
 
+    if (url.pathname === "/api/sync/external") {
+      if (request.method === "GET") {
+        return json({ ok: true, jobs: await listExternalSyncJobs(env) });
+      }
+
+      if (request.method === "POST") {
+        const jobs = await queueAllExternalSyncJobs(env);
+        ctx.waitUntil(
+          runExternalSyncJobs(env, { maxDurationMs: EXTERNAL_SYNC_HTTP_BACKGROUND_MS }).catch((error) =>
+            console.error("Failed to start external sync jobs", error)
+          )
+        );
+        return json({ ok: true, queued: jobs.length, jobs });
+      }
+
+      return methodNotAllowed();
+    }
+
     const defaultDomainMatch = url.pathname.match(/^\/api\/domains\/([^/]+)\/default$/);
     if (defaultDomainMatch) {
       if (request.method !== "POST") return methodNotAllowed();
@@ -314,9 +340,20 @@ export async function handleApi(
       if (!account) {
         throw new ApiError(404, "external_account_not_found", "External account not found");
       }
-      const limit = optionalLimit(url.searchParams.get("limit"));
-      const result = await syncExternalAccount(env, account, { limit });
-      return json({ ok: true, ...result });
+      const mode = url.searchParams.get("mode") ?? "background";
+      if (mode === "blocking") {
+        const limit = optionalLimit(url.searchParams.get("limit"));
+        const result = await syncExternalAccount(env, account, { limit });
+        return json({ ok: true, ...result });
+      }
+
+      const job = await queueExternalSyncJob(env, account);
+      ctx.waitUntil(
+        runExternalSyncJobs(env, { accountId: account.id, maxDurationMs: EXTERNAL_SYNC_HTTP_BACKGROUND_MS }).catch((error) =>
+          console.error("Failed to start external sync job", error)
+        )
+      );
+      return json({ ok: true, job, queued: 1 });
     }
 
     if (url.pathname === "/api/mailboxes") {
@@ -530,6 +567,38 @@ export async function handleApi(
       return methodNotAllowed();
     }
 
+    const bucketObjectTextMatch = url.pathname.match(/^\/api\/buckets\/([^/]+)\/object-text$/);
+    if (bucketObjectTextMatch) {
+      const bucket = getBucketBinding(env, bucketObjectTextMatch[1]);
+      const key = readR2Key(url);
+
+      if (request.method === "GET") {
+        return json({ ok: true, index: await getBucketObjectTextIndex(env, bucket.info, key) });
+      }
+
+      if (request.method === "PUT") {
+        const body = await readJson(request);
+        const text = requiredString(body, "text", { min: 1, max: 200_000 });
+        const source = optionalString(body, "source", { max: 32 }) ?? "manual";
+        const object = await bucket.bucket.head(key);
+        if (!object) {
+          throw new ApiError(404, "bucket_object_not_found", "R2 object not found");
+        }
+
+        const index = await upsertBucketObjectTextIndex(env, bucket.info, object, text, source);
+        ctx.waitUntil(recordAudit(env, "bucket.object_text_indexed", key, { bucket: bucket.info.id, source }));
+        return json({ ok: true, index });
+      }
+
+      if (request.method === "DELETE") {
+        await deleteBucketObjectTextIndex(env, bucket.info.id, key);
+        ctx.waitUntil(recordAudit(env, "bucket.object_text_index_deleted", key, { bucket: bucket.info.id }));
+        return json({ ok: true });
+      }
+
+      return methodNotAllowed();
+    }
+
     const replyMatch = url.pathname.match(/^\/api\/threads\/([^/]+)\/reply$/);
     if (replyMatch) {
       if (request.method !== "POST") return methodNotAllowed();
@@ -631,6 +700,7 @@ const MAX_BUCKET_SEARCH_RESULTS = 100;
 const MAX_BUCKET_SEARCH_SCAN = 1200;
 const MAX_BUCKET_TEXT_SEARCH_FILES = 80;
 const MAX_BUCKET_TEXT_SEARCH_BYTES = 2 * 1024 * 1024;
+const MAX_BUCKET_UNKNOWN_TEXT_SEARCH_BYTES = 256 * 1024;
 
 function listAvailableBuckets(env: RuntimeEnv): BucketInfo[] {
   const configured = Boolean(env.MAIL_BUCKET);
@@ -756,8 +826,23 @@ async function searchBucketObjects(env: RuntimeEnv, url: URL) {
   let scanned = 0;
   let contentScanned = 0;
   let truncated = false;
+  const resultKeys = new Set<string>();
+
+  if (includeText) {
+    for (const indexed of await searchBucketTextIndexes(env, bucketBindings.map((bucket) => bucket.info), normalizedQuery)) {
+      const id = `${indexed.bucketId}:${indexed.key}`;
+      if (resultKeys.has(id)) continue;
+      results.push(indexed);
+      resultKeys.add(id);
+      if (results.length >= MAX_BUCKET_SEARCH_RESULTS) {
+        truncated = true;
+        break;
+      }
+    }
+  }
 
   for (const bucket of bucketBindings) {
+    if (results.length >= MAX_BUCKET_SEARCH_RESULTS) break;
     let cursor: string | undefined;
     do {
       const page = await bucket.bucket.list({
@@ -781,10 +866,16 @@ async function searchBucketObjects(env: RuntimeEnv, url: URL) {
           isTextSearchCandidate(object)
         ) {
           contentScanned += 1;
-          contentSnippet = await findTextMatch(bucket.bucket, object, normalizedQuery);
+          try {
+            contentSnippet = await findTextMatch(bucket.bucket, object, normalizedQuery);
+          } catch {
+            contentSnippet = null;
+          }
         }
 
         if (pathMatches || contentSnippet) {
+          const id = `${bucket.info.id}:${object.key}`;
+          if (resultKeys.has(id)) continue;
           results.push({
             ...serializeR2Object(object),
             bucketId: bucket.info.id,
@@ -793,6 +884,7 @@ async function searchBucketObjects(env: RuntimeEnv, url: URL) {
             match: contentSnippet ? "content" : "path",
             snippet: contentSnippet
           });
+          resultKeys.add(id);
         }
 
         if (results.length >= MAX_BUCKET_SEARCH_RESULTS || scanned >= MAX_BUCKET_SEARCH_SCAN) {
@@ -824,6 +916,163 @@ async function searchBucketObjects(env: RuntimeEnv, url: URL) {
   };
 }
 
+type BucketTextIndexRow = {
+  id: string;
+  bucket_id: string;
+  bucket_name: string;
+  bucket_binding: string;
+  object_key: string;
+  object_name: string;
+  object_size: number;
+  object_etag: string | null;
+  object_content_type: string | null;
+  source: string;
+  text: string;
+  normalized_text: string;
+  created_at: string;
+  updated_at: string;
+};
+
+async function getBucketObjectTextIndex(env: RuntimeEnv, bucket: BucketInfo, key: string): Promise<BucketTextIndexRow | null> {
+  try {
+    return (
+      (await env.DB.prepare("SELECT * FROM bucket_text_index WHERE bucket_id = ? AND object_key = ? LIMIT 1")
+        .bind(bucket.id, key)
+        .first<BucketTextIndexRow>()) ?? null
+    );
+  } catch (error) {
+    if (isMissingBucketTextIndexTable(error)) return null;
+    throw error;
+  }
+}
+
+async function upsertBucketObjectTextIndex(
+  env: RuntimeEnv,
+  bucket: BucketInfo,
+  object: R2Object,
+  text: string,
+  source: string
+): Promise<BucketTextIndexRow> {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    throw new ApiError(400, "empty_index_text", "Index text cannot be empty");
+  }
+
+  const safeSource = /^[a-z0-9_-]{1,32}$/i.test(source) ? source : "manual";
+  const contentType = object.httpMetadata?.contentType ?? null;
+  await env.DB.prepare(
+    `INSERT INTO bucket_text_index (
+      id, bucket_id, bucket_name, bucket_binding, object_key, object_name, object_size,
+      object_etag, object_content_type, source, text, normalized_text, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    ON CONFLICT(bucket_id, object_key) DO UPDATE SET
+      bucket_name = excluded.bucket_name,
+      bucket_binding = excluded.bucket_binding,
+      object_name = excluded.object_name,
+      object_size = excluded.object_size,
+      object_etag = excluded.object_etag,
+      object_content_type = excluded.object_content_type,
+      source = excluded.source,
+      text = excluded.text,
+      normalized_text = excluded.normalized_text,
+      updated_at = CURRENT_TIMESTAMP`
+  )
+    .bind(
+      createId("bti"),
+      bucket.id,
+      bucket.name,
+      bucket.binding,
+      object.key,
+      filenameFromR2Key(object.key),
+      object.size,
+      object.httpEtag,
+      contentType,
+      safeSource,
+      trimmed,
+      normalizeSearchText(trimmed)
+    )
+    .run();
+
+  const row = await getBucketObjectTextIndex(env, bucket, object.key);
+  if (!row) {
+    throw new ApiError(500, "index_save_failed", "Text index could not be saved");
+  }
+  return row;
+}
+
+async function deleteBucketObjectTextIndex(env: RuntimeEnv, bucketId: string, key: string): Promise<void> {
+  try {
+    await env.DB.prepare("DELETE FROM bucket_text_index WHERE bucket_id = ? AND object_key = ?").bind(bucketId, key).run();
+  } catch (error) {
+    if (isMissingBucketTextIndexTable(error)) return;
+    throw error;
+  }
+}
+
+async function searchBucketTextIndexes(
+  env: RuntimeEnv,
+  buckets: BucketInfo[],
+  normalizedQuery: string
+): Promise<Array<ReturnType<typeof serializeR2Object> & {
+  bucketId: string;
+  bucketName: string;
+  bucketBinding: string;
+  match: "content";
+  snippet: string | null;
+}>> {
+  const rows: BucketTextIndexRow[] = [];
+
+  try {
+    for (const bucket of buckets) {
+      const result = await env.DB.prepare(
+        `SELECT * FROM bucket_text_index
+        WHERE bucket_id = ? AND normalized_text LIKE ? ESCAPE '\\'
+        ORDER BY updated_at DESC
+        LIMIT ?`
+      )
+        .bind(bucket.id, `%${escapeSqlLike(normalizedQuery)}%`, MAX_BUCKET_SEARCH_RESULTS)
+        .all<BucketTextIndexRow>();
+      rows.push(...(result.results ?? []));
+      if (rows.length >= MAX_BUCKET_SEARCH_RESULTS) break;
+    }
+  } catch (error) {
+    if (isMissingBucketTextIndexTable(error)) return [];
+    throw error;
+  }
+
+  return rows.slice(0, MAX_BUCKET_SEARCH_RESULTS).map((row) => ({
+    key: row.object_key,
+    name: row.object_name,
+    size: row.object_size,
+    uploaded: row.updated_at,
+    etag: row.object_etag ?? "",
+    contentType: row.object_content_type ?? "text/plain",
+    bucketId: row.bucket_id,
+    bucketName: row.bucket_name,
+    bucketBinding: row.bucket_binding,
+    match: "content" as const,
+    snippet: snippetForNormalizedText(row.text, normalizedQuery)
+  }));
+}
+
+function snippetForNormalizedText(text: string, normalizedQuery: string): string | null {
+  const normalizedText = normalizeSearchText(text);
+  const index = normalizedText.indexOf(normalizedQuery);
+  if (index < 0) return null;
+  const { start, end } = snippetBoundsForNormalizedMatch(text, normalizedQuery, index);
+  const prefix = start > 0 ? "..." : "";
+  const suffix = end < text.length ? "..." : "";
+  return `${prefix}${text.slice(start, end).replace(/\s+/g, " ").trim()}${suffix}`;
+}
+
+function escapeSqlLike(value: string): string {
+  return value.replace(/[\\%_]/g, "\\$&");
+}
+
+function isMissingBucketTextIndexTable(error: unknown): boolean {
+  return error instanceof Error && /bucket_text_index|no such table/i.test(error.message);
+}
+
 async function findTextMatch(bucket: R2Bucket, object: R2Object, normalizedQuery: string): Promise<string | null> {
   const body = await bucket.get(object.key);
   if (!body) return null;
@@ -834,11 +1083,34 @@ async function findTextMatch(bucket: R2Bucket, object: R2Object, normalizedQuery
   const normalizedText = normalizeSearchText(text);
   const index = normalizedText.indexOf(normalizedQuery);
   if (index < 0) return null;
-  const start = Math.max(0, index - 80);
-  const end = Math.min(text.length, index + normalizedQuery.length + 120);
+  const { start, end } = snippetBoundsForNormalizedMatch(text, normalizedQuery, index);
   const prefix = start > 0 ? "..." : "";
   const suffix = end < text.length ? "..." : "";
   return `${prefix}${text.slice(start, end).replace(/\s+/g, " ").trim()}${suffix}`;
+}
+
+function snippetBoundsForNormalizedMatch(text: string, normalizedQuery: string, normalizedIndex: number): { start: number; end: number } {
+  let normalizedCursor = 0;
+  let matchStart = 0;
+  let matchEnd = text.length;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const normalizedChar = normalizeSearchText(text[index] ?? "");
+    const nextCursor = normalizedCursor + normalizedChar.length;
+    if (normalizedCursor <= normalizedIndex && nextCursor > normalizedIndex) {
+      matchStart = index;
+    }
+    if (normalizedCursor < normalizedIndex + normalizedQuery.length && nextCursor >= normalizedIndex + normalizedQuery.length) {
+      matchEnd = index + 1;
+      break;
+    }
+    normalizedCursor = nextCursor;
+  }
+
+  return {
+    start: Math.max(0, matchStart - 80),
+    end: Math.min(text.length, matchEnd + 120)
+  };
 }
 
 function normalizeSearchText(value: string): string {
@@ -854,11 +1126,35 @@ function isTextSearchCandidate(object: R2Object): boolean {
   const contentType = object.httpMetadata?.contentType?.toLowerCase() ?? "";
   const filename = object.key.toLowerCase();
   const textExtensions = [".txt", ".md", ".csv", ".json", ".log", ".xml", ".html", ".css", ".js", ".ts", ".tsx", ".yml", ".yaml"];
+  const knownBinaryExtensions = [
+    ".avif",
+    ".bmp",
+    ".doc",
+    ".docx",
+    ".gif",
+    ".heic",
+    ".jpeg",
+    ".jpg",
+    ".mov",
+    ".mp3",
+    ".mp4",
+    ".png",
+    ".rar",
+    ".webp",
+    ".xls",
+    ".xlsx",
+    ".zip"
+  ];
+  const unknownSmallFile =
+    object.size <= MAX_BUCKET_UNKNOWN_TEXT_SEARCH_BYTES &&
+    (!contentType || contentType === "application/octet-stream") &&
+    !knownBinaryExtensions.some((extension) => filename.endsWith(extension));
   return (
     isPdfSearchCandidate(object) ||
     contentType.startsWith("text/") ||
     contentType.includes("json") ||
-    textExtensions.some((extension) => filename.endsWith(extension))
+    textExtensions.some((extension) => filename.endsWith(extension)) ||
+    unknownSmallFile
   );
 }
 
@@ -876,7 +1172,8 @@ async function extractPdfText(buffer: ArrayBuffer): Promise<string> {
     chunks.push(decodePdfBytes(stream));
   }
 
-  return extractPdfOperatorText(chunks.join("\n"));
+  const source = chunks.join("\n");
+  return extractPdfOperatorText(source, parsePdfUnicodeMap(source));
 }
 
 async function extractPdfStreams(bytes: Uint8Array, raw: string): Promise<Uint8Array[]> {
@@ -901,7 +1198,7 @@ async function extractPdfStreams(bytes: Uint8Array, raw: string): Promise<Uint8A
       dataEnd -= 1;
     }
 
-    const dictionary = raw.slice(Math.max(0, streamIndex - 500), streamIndex);
+    const dictionary = raw.slice(Math.max(0, streamIndex - 2000), streamIndex);
     const streamBytes = bytes.slice(dataStart, dataEnd);
     if (/\/Filter\s*(?:\/FlateDecode|\[[^\]]*\/FlateDecode)/.test(dictionary)) {
       const inflated = await inflatePdfStream(streamBytes);
@@ -927,36 +1224,42 @@ async function inflatePdfStream(bytes: Uint8Array): Promise<Uint8Array | null> {
   }
 }
 
-function extractPdfOperatorText(source: string): string {
+function extractPdfOperatorText(source: string, unicodeMap = new Map<string, string>()): string {
   const parts: string[] = [];
 
   for (const match of source.matchAll(/\[((?:.|\n|\r)*?)\]\s*TJ/g)) {
-    parts.push(...extractPdfStrings(match[1]));
+    parts.push(extractPdfStrings(match[1], unicodeMap).join(""));
   }
 
   for (const match of source.matchAll(/(\((?:\\.|[^\\()])*\)|<[\dA-Fa-f\s]+>)\s*(?:Tj|'|")/g)) {
-    parts.push(decodePdfTokenString(match[1]));
+    parts.push(decodePdfTokenString(match[1], unicodeMap));
   }
 
-  const text = parts
+  const textParts = parts
     .map((part) => part.replace(/\s+/g, " ").trim())
-    .filter(Boolean)
-    .join(" ");
+    .filter(Boolean);
+
+  const text = textParts.join(" ");
+  const compactText = textParts.join("");
+
+  if (text && compactText && compactText !== text) {
+    return `${text}\n${compactText}`;
+  }
 
   return text || source.replace(/[^\p{L}\p{N}\s.,;:!?@/#%&()[\]{}_-]+/gu, " ");
 }
 
-function extractPdfStrings(value: string): string[] {
+function extractPdfStrings(value: string, unicodeMap: Map<string, string>): string[] {
   const strings: string[] = [];
   for (const match of value.matchAll(/\((?:\\.|[^\\()])*\)|<[\dA-Fa-f\s]+>/g)) {
-    strings.push(decodePdfTokenString(match[0]));
+    strings.push(decodePdfTokenString(match[0], unicodeMap));
   }
   return strings;
 }
 
-function decodePdfTokenString(token: string): string {
+function decodePdfTokenString(token: string, unicodeMap = new Map<string, string>()): string {
   if (token.startsWith("<")) {
-    return decodePdfHexString(token);
+    return decodePdfHexString(token, unicodeMap);
   }
   return decodePdfLiteralString(token);
 }
@@ -1008,13 +1311,113 @@ function decodePdfLiteralString(token: string): string {
   return decodePdfStringBytes(new Uint8Array(bytes));
 }
 
-function decodePdfHexString(token: string): string {
+function decodePdfHexString(token: string, unicodeMap = new Map<string, string>()): string {
   const hex = token.slice(1, -1).replace(/\s+/g, "");
+  const mapped = decodeMappedPdfHexString(hex, unicodeMap);
+  if (mapped) return mapped;
   const bytes = new Uint8Array(Math.ceil(hex.length / 2));
   for (let index = 0; index < bytes.length; index += 1) {
     bytes[index] = Number.parseInt(hex.slice(index * 2, index * 2 + 2).padEnd(2, "0"), 16);
   }
   return decodePdfStringBytes(bytes);
+}
+
+function parsePdfUnicodeMap(source: string): Map<string, string> {
+  const map = new Map<string, string>();
+
+  for (const block of source.matchAll(/beginbfchar([\s\S]*?)endbfchar/g)) {
+    for (const match of block[1].matchAll(/<([\dA-Fa-f\s]+)>\s+<([\dA-Fa-f\s]+)>/g)) {
+      map.set(cleanPdfHex(match[1]), decodePdfUnicodeHex(match[2]));
+    }
+  }
+
+  for (const block of source.matchAll(/beginbfrange([\s\S]*?)endbfrange/g)) {
+    for (const match of block[1].matchAll(/<([\dA-Fa-f\s]+)>\s+<([\dA-Fa-f\s]+)>\s+\[((?:\s*<[\dA-Fa-f\s]+>)+)\]/g)) {
+      const start = Number.parseInt(cleanPdfHex(match[1]), 16);
+      const end = Number.parseInt(cleanPdfHex(match[2]), 16);
+      const width = cleanPdfHex(match[1]).length;
+      const values = Array.from(match[3].matchAll(/<([\dA-Fa-f\s]+)>/g)).map((item) => decodePdfUnicodeHex(item[1]));
+      for (let code = start; code <= end && code - start < values.length; code += 1) {
+        map.set(code.toString(16).toUpperCase().padStart(width, "0"), values[code - start]);
+      }
+    }
+
+    for (const match of block[1].matchAll(/<([\dA-Fa-f\s]+)>\s+<([\dA-Fa-f\s]+)>\s+<([\dA-Fa-f\s]+)>/g)) {
+      const startHex = cleanPdfHex(match[1]);
+      const start = Number.parseInt(startHex, 16);
+      const end = Number.parseInt(cleanPdfHex(match[2]), 16);
+      const destination = unicodeCodePointsFromPdfHex(match[3]);
+      const width = startHex.length;
+      if (destination.length === 0) continue;
+
+      for (let code = start; code <= end; code += 1) {
+        const nextDestination = [...destination];
+        nextDestination[nextDestination.length - 1] += code - start;
+        map.set(code.toString(16).toUpperCase().padStart(width, "0"), String.fromCodePoint(...nextDestination));
+      }
+    }
+  }
+
+  return map;
+}
+
+function decodeMappedPdfHexString(hex: string, unicodeMap: Map<string, string>): string | null {
+  if (unicodeMap.size === 0) return null;
+  const clean = cleanPdfHex(hex);
+  const codeLengths = Array.from(new Set(Array.from(unicodeMap.keys()).map((key) => key.length))).sort((a, b) => b - a);
+  let output = "";
+  let cursor = 0;
+  let mappedAny = false;
+
+  while (cursor < clean.length) {
+    const matchLength = codeLengths.find((length) => unicodeMap.has(clean.slice(cursor, cursor + length)));
+    if (matchLength) {
+      output += unicodeMap.get(clean.slice(cursor, cursor + matchLength)) ?? "";
+      cursor += matchLength;
+      mappedAny = true;
+      continue;
+    }
+
+    const fallbackByte = clean.slice(cursor, cursor + 2);
+    if (fallbackByte.length === 2) {
+      const charCode = Number.parseInt(fallbackByte, 16);
+      if (charCode >= 32) output += String.fromCharCode(charCode);
+    }
+    cursor += 2;
+  }
+
+  return mappedAny ? output : null;
+}
+
+function decodePdfUnicodeHex(hex: string): string {
+  return String.fromCodePoint(...unicodeCodePointsFromPdfHex(hex));
+}
+
+function unicodeCodePointsFromPdfHex(hex: string): number[] {
+  const clean = cleanPdfHex(hex);
+  const bytes = new Uint8Array(Math.ceil(clean.length / 2));
+  for (let index = 0; index < bytes.length; index += 1) {
+    bytes[index] = Number.parseInt(clean.slice(index * 2, index * 2 + 2).padEnd(2, "0"), 16);
+  }
+
+  const codePoints: number[] = [];
+  for (let index = 0; index + 1 < bytes.length; index += 2) {
+    const code = (bytes[index] << 8) | bytes[index + 1];
+    if (code >= 0xd800 && code <= 0xdbff && index + 3 < bytes.length) {
+      const next = (bytes[index + 2] << 8) | bytes[index + 3];
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        codePoints.push(0x10000 + ((code - 0xd800) << 10) + (next - 0xdc00));
+        index += 2;
+        continue;
+      }
+    }
+    codePoints.push(code);
+  }
+  return codePoints;
+}
+
+function cleanPdfHex(value: string): string {
+  return value.replace(/\s+/g, "").toUpperCase();
 }
 
 function decodePdfStringBytes(bytes: Uint8Array): string {

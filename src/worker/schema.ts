@@ -9,7 +9,9 @@ const CURRENT_MIGRATIONS = [
   "0006_admin_profile_reset.sql",
   "0007_external_accounts.sql",
   "0008_contact_phone.sql",
-  "0009_auth_attempts.sql"
+  "0009_auth_attempts.sql",
+  "0010_bucket_text_index.sql",
+  "0011_external_sync_jobs.sql"
 ];
 
 let schemaReady: Promise<void> | null = null;
@@ -216,6 +218,42 @@ const schemaStatements = [
     locked_until TEXT,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`,
+  `CREATE TABLE IF NOT EXISTS bucket_text_index (
+    id TEXT PRIMARY KEY,
+    bucket_id TEXT NOT NULL,
+    bucket_name TEXT NOT NULL,
+    bucket_binding TEXT NOT NULL,
+    object_key TEXT NOT NULL,
+    object_name TEXT NOT NULL,
+    object_size INTEGER NOT NULL DEFAULT 0,
+    object_etag TEXT,
+    object_content_type TEXT,
+    source TEXT NOT NULL DEFAULT 'manual',
+    text TEXT NOT NULL,
+    normalized_text TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(bucket_id, object_key)
+  )`,
+  `CREATE TABLE IF NOT EXISTS external_sync_jobs (
+    account_id TEXT PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'complete', 'failed')),
+    folders_json TEXT NOT NULL DEFAULT '[]',
+    folder_index INTEGER NOT NULL DEFAULT 0,
+    next_uid_exclusive INTEGER,
+    imported INTEGER NOT NULL DEFAULT 0,
+    skipped INTEGER NOT NULL DEFAULT 0,
+    checked INTEGER NOT NULL DEFAULT 0,
+    run_count INTEGER NOT NULL DEFAULT 0,
+    has_more INTEGER NOT NULL DEFAULT 1,
+    message TEXT,
+    last_error TEXT,
+    lease_until TEXT,
+    started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at TEXT,
+    FOREIGN KEY (account_id) REFERENCES external_accounts(id) ON DELETE CASCADE
+  )`,
   `CREATE TABLE IF NOT EXISTS d1_migrations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT UNIQUE,
@@ -240,4 +278,8 @@ const indexStatements = [
   "CREATE INDEX IF NOT EXISTS idx_admin_auth_email ON admin_auth(admin_email)",
   "CREATE INDEX IF NOT EXISTS idx_admin_auth_reset ON admin_auth(reset_token_hash)",
   "CREATE INDEX IF NOT EXISTS idx_auth_attempts_locked ON auth_attempts(locked_until)"
+  ,
+  "CREATE INDEX IF NOT EXISTS idx_bucket_text_index_bucket ON bucket_text_index(bucket_id, object_key)",
+  "CREATE INDEX IF NOT EXISTS idx_bucket_text_index_normalized ON bucket_text_index(normalized_text)",
+  "CREATE INDEX IF NOT EXISTS idx_external_sync_jobs_status ON external_sync_jobs(status, lease_until, updated_at)"
 ];

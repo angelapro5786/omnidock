@@ -119,6 +119,27 @@ export type ExternalAccountRow = {
   updated_at: string;
 };
 
+export type ExternalSyncJobStatus = "queued" | "running" | "complete" | "failed";
+
+export type ExternalSyncJobRow = {
+  account_id: string;
+  status: ExternalSyncJobStatus;
+  folders_json: string;
+  folder_index: number;
+  next_uid_exclusive: number | null;
+  imported: number;
+  skipped: number;
+  checked: number;
+  run_count: number;
+  has_more: number;
+  message: string | null;
+  last_error: string | null;
+  lease_until: string | null;
+  started_at: string;
+  updated_at: string;
+  completed_at: string | null;
+};
+
 export type BucketRow = {
   id: string;
   name: string;
@@ -182,6 +203,28 @@ export type BucketSearchPayload = {
   scanned: number;
   contentScanned: number;
   truncated: boolean;
+};
+
+export type BucketTextIndexRow = {
+  id: string;
+  bucket_id: string;
+  bucket_name: string;
+  bucket_binding: string;
+  object_key: string;
+  object_name: string;
+  object_size: number;
+  object_etag: string | null;
+  object_content_type: string | null;
+  source: string;
+  text: string;
+  normalized_text: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type BucketTextIndexPayload = {
+  ok: true;
+  index: BucketTextIndexRow | null;
 };
 
 export type SetupStatusPayload = {

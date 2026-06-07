@@ -108,6 +108,7 @@ type AppConfirmOptions = {
 type AppPromptOptions = AppConfirmOptions & {
   defaultValue?: string;
   placeholder?: string;
+  multiline?: boolean;
 };
 type AppDialogApi = {
   confirm: (options: AppConfirmOptions) => Promise<boolean>;
@@ -306,13 +307,23 @@ function AppDialogProvider({ children }: { children: ReactNode }) {
               </div>
             </header>
             {dialog.kind === "prompt" ? (
-              <input
-                className="text-input"
-                value={promptValue}
-                onChange={(event) => setPromptValue(event.target.value)}
-                placeholder={dialog.placeholder}
-                autoFocus
-              />
+              dialog.multiline ? (
+                <textarea
+                  className="text-input app-dialog-textarea"
+                  value={promptValue}
+                  onChange={(event) => setPromptValue(event.target.value)}
+                  placeholder={dialog.placeholder}
+                  autoFocus
+                />
+              ) : (
+                <input
+                  className="text-input"
+                  value={promptValue}
+                  onChange={(event) => setPromptValue(event.target.value)}
+                  placeholder={dialog.placeholder}
+                  autoFocus
+                />
+              )
             ) : null}
             <div className="app-dialog-actions">
               <button className="button ghost" type="button" onClick={() => closeDialog(dialog.kind === "prompt" ? null : false)}>
@@ -3636,6 +3647,9 @@ function BucketObjectPreview({
     text: string | null;
     blob: Blob | null;
   }>({ loading: false, downloading: false, error: null, kind: "download", url: null, text: null, blob: null });
+  const [textIndex, setTextIndex] = useState<{ text: string; source: string; updatedAt: string } | null>(null);
+  const [indexBusy, setIndexBusy] = useState(false);
+  const dialog = useAppDialog();
 
   useEffect(() => {
     let active = true;
@@ -3678,6 +3692,31 @@ function BucketObjectPreview({
     };
   }, [api, bucket, object, onNotice]);
 
+  useEffect(() => {
+    let active = true;
+
+    async function loadTextIndex() {
+      if (!api || !bucket || !object) {
+        setTextIndex(null);
+        return;
+      }
+
+      try {
+        const data = await api.getBucketObjectTextIndex(bucket.id, object.key);
+        if (active) {
+          setTextIndex(data.index ? { text: data.index.text, source: data.index.source, updatedAt: data.index.updated_at } : null);
+        }
+      } catch {
+        if (active) setTextIndex(null);
+      }
+    }
+
+    void loadTextIndex();
+    return () => {
+      active = false;
+    };
+  }, [api, bucket, object]);
+
   async function downloadObject() {
     if (!api || !bucket || !object) return;
     if (state.blob) {
@@ -3696,6 +3735,65 @@ function BucketObjectPreview({
     }
   }
 
+  async function editTextIndex() {
+    if (!api || !bucket || !object) return;
+    const input = await dialog.prompt({
+      title: "Index text",
+      message: (
+        <>
+          Paste OCR text or extracted text for <strong>{object.name}</strong>. Bucket search will use this saved index.
+        </>
+      ),
+      defaultValue: textIndex?.text ?? state.text ?? "",
+      placeholder: "Paste OCR text here",
+      confirmLabel: "Save index",
+      multiline: true
+    });
+    if (input === null) return;
+    const text = input.trim();
+    if (!text) {
+      onNotice("Index text cannot be empty");
+      return;
+    }
+
+    setIndexBusy(true);
+    try {
+      const data = await api.saveBucketObjectTextIndex(bucket.id, object.key, text, "manual");
+      setTextIndex(data.index ? { text: data.index.text, source: data.index.source, updatedAt: data.index.updated_at } : null);
+      onNotice("Text index saved. Search can find this object now.");
+    } catch (error) {
+      onNotice(readError(error));
+    } finally {
+      setIndexBusy(false);
+    }
+  }
+
+  async function removeTextIndex() {
+    if (!api || !bucket || !object || !textIndex) return;
+    const confirmed = await dialog.confirm({
+      title: "Delete text index",
+      message: (
+        <>
+          Remove the saved search text for <strong>{object.name}</strong>?
+        </>
+      ),
+      confirmLabel: "Delete",
+      tone: "danger"
+    });
+    if (!confirmed) return;
+
+    setIndexBusy(true);
+    try {
+      await api.deleteBucketObjectTextIndex(bucket.id, object.key);
+      setTextIndex(null);
+      onNotice("Text index deleted");
+    } catch (error) {
+      onNotice(readError(error));
+    } finally {
+      setIndexBusy(false);
+    }
+  }
+
   return (
     <section className="bucket-panel preview-panel">
       <header>
@@ -3709,6 +3807,16 @@ function BucketObjectPreview({
           ) : null}
         </div>
         <div className="preview-actions">
+          <button className="button ghost" type="button" disabled={!object || !api || !bucket || indexBusy} onClick={() => void editTextIndex()}>
+            {indexBusy ? <Loader2 size={15} /> : <FileText size={15} />}
+            {textIndex ? "Edit index" : "Index text"}
+          </button>
+          {textIndex ? (
+            <button className="button ghost" type="button" disabled={indexBusy} onClick={() => void removeTextIndex()} title="Delete text index">
+              <Trash2 size={15} />
+              Clear index
+            </button>
+          ) : null}
           <button
             className="button ghost"
             type="button"
@@ -3726,6 +3834,12 @@ function BucketObjectPreview({
       </header>
 
       <div className="bucket-preview-body">
+        {object && textIndex ? (
+          <div className="bucket-index-note">
+            <FileText size={14} />
+            Search index saved from {textIndex.source} at {formatDate(textIndex.updatedAt)}
+          </div>
+        ) : null}
         {!object ? (
           <div className="preview-fallback">
             <Server size={30} />
