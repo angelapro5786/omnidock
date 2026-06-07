@@ -275,6 +275,8 @@ External account profiles let you document Gmail, Outlook, Yahoo, iCloud, or cus
 
 For Gmail app passwords, create a Worker secret whose name is the Gmail address. In Cloudflare, set `Name` to `name@gmail.com` and `Value` to the Gmail app password. In OmniDock, add the same Gmail address as the external account. For multiple Gmail accounts, each account naturally gets its own secret name because each email address is unique.
 
+External inbox pulling is resumable. Pressing `Sync` queues D1-backed background jobs, starts a short immediate Worker run, and then the scheduled Worker continues jobs every minute. Each scheduled run is capped at 15 minutes. If a mailbox is too large to finish in one run, OmniDock keeps the folder and IMAP UID cursor in D1; pressing `Sync` again continues from the saved cursor instead of starting over. Refreshing or closing the dashboard does not cancel the queued pull.
+
 ### Other Settings
 
 Other Settings controls automatic refresh. The default is 10 seconds and can be changed from the UI.

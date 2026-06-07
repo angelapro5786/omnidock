@@ -277,8 +277,7 @@ const indexStatements = [
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_domains_default ON domains(is_default) WHERE is_default = 1",
   "CREATE INDEX IF NOT EXISTS idx_admin_auth_email ON admin_auth(admin_email)",
   "CREATE INDEX IF NOT EXISTS idx_admin_auth_reset ON admin_auth(reset_token_hash)",
-  "CREATE INDEX IF NOT EXISTS idx_auth_attempts_locked ON auth_attempts(locked_until)"
-  ,
+  "CREATE INDEX IF NOT EXISTS idx_auth_attempts_locked ON auth_attempts(locked_until)",
   "CREATE INDEX IF NOT EXISTS idx_bucket_text_index_bucket ON bucket_text_index(bucket_id, object_key)",
   "CREATE INDEX IF NOT EXISTS idx_bucket_text_index_normalized ON bucket_text_index(normalized_text)",
   "CREATE INDEX IF NOT EXISTS idx_external_sync_jobs_status ON external_sync_jobs(status, lease_until, updated_at)"

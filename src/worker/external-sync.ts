@@ -300,6 +300,7 @@ async function syncExternalAccountBatch(
 
         const raw = await imap.fetchRaw(uid);
         checked += 1;
+        nextUidExclusive = uid;
         if (!raw) {
           skipped += 1;
           continue;
@@ -311,7 +312,6 @@ async function syncExternalAccountBatch(
         } else {
           skipped += 1;
         }
-        nextUidExclusive = uid;
       }
 
       if (hasMore) break;

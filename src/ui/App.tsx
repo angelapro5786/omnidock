@@ -64,6 +64,7 @@ import {
   ContactRow,
   DomainRow,
   ExternalAccountRow,
+  ExternalSyncJobRow,
   FolderKey,
   MailboxRow,
   MailboxSignatureRow,
@@ -79,6 +80,8 @@ const DEFAULT_MAILBOX_KEY = "omnidock.defaultMailbox";
 const REFRESH_INTERVAL_KEY = "omnidock.refreshIntervalSeconds";
 const DEFAULT_REFRESH_INTERVAL_SECONDS = 10;
 const EXTERNAL_MAILBOX_SCOPE_PREFIX = "external:";
+const EXTERNAL_SYNC_POLL_INTERVAL_MS = 2500;
+const EXTERNAL_SYNC_UI_MAX_WAIT_MS = 15 * 60 * 1000;
 
 const folders: { key: FolderKey; label: string; icon: typeof Inbox }[] = [
   { key: "inbox", label: "Inbox", icon: Inbox },
@@ -543,13 +546,14 @@ function AppContent() {
     if (externalSyncingIds.current.has(selectedExternalAccount.id)) return;
 
     externalSyncingIds.current.add(selectedExternalAccount.id);
-    setSyncLog(`Syncing ${selectedExternalAccount.email} old mail...`);
-    setNotice(`Syncing old emails for ${selectedExternalAccount.email}...`);
-    void syncExternalHistory(api, selectedExternalAccount.id)
-      .then(async (result) => {
+    setSyncLog(`Queueing ${selectedExternalAccount.email} old mail pull...`);
+    setNotice(`Old mail pull queued for ${selectedExternalAccount.email}.`);
+    void api.syncExternalAccount(selectedExternalAccount.id)
+      .then(async () => {
+        const result = await pollExternalSyncJobs(api, [selectedExternalAccount], setSyncLog);
         await loadBootstrap();
         await loadThreads({ preserveSelection: true });
-        const moreText = result.hasMore ? " More mail remains; OmniDock will continue on the next sync." : "";
+        const moreText = result.timedOut ? " More mail remains; run Sync again to continue from the saved cursor." : "";
         setSyncLog(`${selectedExternalAccount.email}: ${result.imported} imported, ${result.skipped} skipped`);
         setNotice(`External mail synced: ${result.imported} imported, ${result.skipped} skipped.${moreText}`);
       })
@@ -819,8 +823,6 @@ function AppContent() {
 
     setBusy(true);
     setNotice(null);
-    let imported = 0;
-    let skipped = 0;
     const errors: string[] = [];
 
     try {
@@ -842,20 +844,16 @@ function AppContent() {
 
       if (inboundAccounts.length === 0) {
         setSyncLog("No external inboxes to pull");
-      }
-
-      for (const account of inboundAccounts) {
-        try {
-          setSyncLog(`${externalProviderLabel(account.provider)} ${account.email}: pulling mail...`);
-          const result = await syncExternalHistory(api, account.id, (message) => setSyncLog(`${account.email}: ${message}`));
-          imported += result.imported;
-          skipped += result.skipped;
-          const moreText = result.hasMore ? " more remains" : "done";
-          setSyncLog(`${account.email}: ${result.imported} imported, ${result.skipped} skipped, ${moreText}`);
-        } catch (error) {
-          const message = readError(error);
-          errors.push(`${account.email}: ${message}`);
-          setSyncLog(`${account.email}: ${message}`);
+      } else {
+        setSyncLog(`Queueing ${inboundAccounts.length} external inbox${inboundAccounts.length === 1 ? "" : "es"}...`);
+        const queued = await api.startExternalSync();
+        setSyncLog(`Queued ${queued.queued} external inbox${queued.queued === 1 ? "" : "es"}. Pulling in background...`);
+        const result = await pollExternalSyncJobs(api, inboundAccounts, setSyncLog);
+        if (result.timedOut) {
+          errors.push("External mail is still pulling. Sync again continues from the saved cursor.");
+        }
+        if (result.failed > 0) {
+          errors.push(`${result.failed} external inbox pull failed.`);
         }
       }
 
@@ -864,12 +862,15 @@ function AppContent() {
       setFolderStats(refreshed.stats);
       await loadThreads({ preserveSelection: true });
 
+      const finalJobs = await api.externalSyncJobs().catch(() => ({ ok: true as const, jobs: [] }));
+      const inboundAccountIds = new Set(inboundAccounts.map((account) => account.id));
+      const totals = summarizeExternalSyncJobs(finalJobs.jobs.filter((job) => inboundAccountIds.has(job.account_id)));
       if (errors.length > 0) {
         setNotice(`Sync finished with ${errors.length} warning${errors.length === 1 ? "" : "s"}: ${errors.join(" | ")}`);
-        setSyncLog(`Sync finished: ${imported} imported, ${skipped} skipped, ${errors.length} warning${errors.length === 1 ? "" : "s"}`);
+        setSyncLog(`Sync finished: ${totals.imported} imported, ${totals.skipped} skipped, ${errors.length} warning${errors.length === 1 ? "" : "s"}`);
       } else {
-        setNotice(`Sync complete: ${imported} imported, ${skipped} skipped`);
-        setSyncLog(`Sync complete: ${imported} imported, ${skipped} skipped`);
+        setNotice(`Sync complete: ${totals.imported} imported, ${totals.skipped} skipped`);
+        setSyncLog(`Sync complete: ${totals.imported} imported, ${totals.skipped} skipped`);
       }
     } catch (error) {
       const message = readError(error);
@@ -2812,10 +2813,11 @@ function ExternalAccountsView({
       setSelectedId(result.account.id);
       await onChange();
       if (result.account.inbound_enabled === 1) {
-        onNotice(`External account saved. Syncing old emails for ${result.account.email}...`);
-        const sync = await syncExternalHistory(api, result.account.id, (message) => onNotice(`${result.account.email}: ${message}`));
+        onNotice(`External account saved. Old mail pull queued for ${result.account.email}.`);
+        await api.syncExternalAccount(result.account.id);
+        const sync = await pollExternalSyncJobs(api, [result.account], (message) => onNotice(`${result.account.email}: ${message}`));
         await onChange();
-        const moreText = sync.hasMore ? " More mail remains; OmniDock will continue on the next sync." : "";
+        const moreText = sync.timedOut ? " More mail remains; run Sync again to continue from the saved cursor." : "";
         onNotice(`External mail synced: ${sync.imported} imported, ${sync.skipped} skipped.${moreText}`);
       } else {
         onNotice("External account saved");
@@ -3104,29 +3106,73 @@ function sendableFromOptions(mailboxes: MailboxRow[], externalAccounts: External
   return options;
 }
 
-async function syncExternalHistory(api: ApiClient, accountId: string, onProgress?: (message: string) => void): Promise<{
+async function pollExternalSyncJobs(
+  api: ApiClient,
+  accounts: ExternalAccountRow[],
+  onProgress?: (message: string) => void
+): Promise<{
   imported: number;
   skipped: number;
   checked: number;
-  hasMore: boolean;
+  timedOut: boolean;
+  failed: number;
 }> {
-  let imported = 0;
-  let skipped = 0;
-  let checked = 0;
-  let hasMore = false;
+  const startedAt = Date.now();
+  const accountIds = new Set(accounts.map((account) => account.id));
+  const accountNames = new Map(accounts.map((account) => [account.id, account.email]));
+  let latestJobs: ExternalSyncJobRow[] = [];
 
-  for (let round = 0; round < 4; round += 1) {
-    onProgress?.(`pulling batch ${round + 1}...`);
-    const result = await api.syncExternalAccount(accountId, 300);
-    imported += result.imported;
-    skipped += result.skipped;
-    checked += result.checked;
-    hasMore = result.hasMore;
-    onProgress?.(`batch ${round + 1}: ${result.imported} imported, ${result.skipped} skipped`);
-    if (!result.hasMore) break;
+  for (;;) {
+    const payload = await api.externalSyncJobs();
+    latestJobs = payload.jobs.filter((job) => accountIds.has(job.account_id));
+    const summary = summarizeExternalSyncJobs(latestJobs);
+    onProgress?.(formatExternalSyncProgress(latestJobs, accountNames, summary));
+
+    const active = latestJobs.filter((job) => job.status === "queued" || job.status === "running");
+    if (active.length === 0) {
+      return { ...summary, timedOut: false };
+    }
+
+    if (Date.now() - startedAt >= EXTERNAL_SYNC_UI_MAX_WAIT_MS) {
+      return { ...summary, timedOut: true };
+    }
+
+    await delay(EXTERNAL_SYNC_POLL_INTERVAL_MS);
   }
+}
 
-  return { imported, skipped, checked, hasMore };
+function summarizeExternalSyncJobs(jobs: ExternalSyncJobRow[]): { imported: number; skipped: number; checked: number; failed: number } {
+  return jobs.reduce(
+    (total, job) => ({
+      imported: total.imported + job.imported,
+      skipped: total.skipped + job.skipped,
+      checked: total.checked + job.checked,
+      failed: total.failed + (job.status === "failed" ? 1 : 0)
+    }),
+    { imported: 0, skipped: 0, checked: 0, failed: 0 }
+  );
+}
+
+function formatExternalSyncProgress(
+  jobs: ExternalSyncJobRow[],
+  accountNames: Map<string, string>,
+  summary: { imported: number; skipped: number; checked: number; failed: number }
+): string {
+  const running = jobs.find((job) => job.status === "running");
+  const queued = jobs.filter((job) => job.status === "queued").length;
+  const active = running ?? jobs.find((job) => job.status === "queued");
+  const activeName = active ? accountNames.get(active.account_id) ?? active.account_id : null;
+  const state = active
+    ? `${activeName}: ${active.status}${active.message ? ` - ${active.message}` : ""}`
+    : summary.failed > 0
+      ? `${summary.failed} external inbox failed`
+      : "External inbox pull complete";
+  const queuedText = queued > 0 ? `, ${queued} queued` : "";
+  return `${state}${queuedText} | ${summary.imported} imported, ${summary.skipped} skipped, ${summary.checked} checked`;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function OtherSettingsView({
