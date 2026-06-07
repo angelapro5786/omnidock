@@ -458,7 +458,7 @@ function indexOfCrlf(bytes: Uint8Array): number {
 }
 
 function addressListFromParsed(value: unknown, fallback: string): string[] {
-  const fallbackAddress = normalizeEmail(fallback);
+  const fallbackAddress = fallback ? normalizeEmail(fallback) : null;
   if (Array.isArray(value)) {
     const addresses = value
       .flatMap((entry) => {
@@ -476,10 +476,10 @@ function addressListFromParsed(value: unknown, fallback: string): string[] {
       .filter(Boolean)
       .map((address) => safeNormalizeEmail(address, ""))
       .filter(Boolean);
-    return addresses.length > 0 ? addresses : [fallbackAddress];
+    return addresses.length > 0 ? addresses : fallbackAddress ? [fallbackAddress] : [];
   }
 
-  if (fallback) {
+  if (fallbackAddress) {
     return [fallbackAddress];
   }
 

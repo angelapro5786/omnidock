@@ -230,6 +230,10 @@ export async function getExternalAccountById(env: RuntimeEnv, id: string): Promi
   return (await env.DB.prepare("SELECT * FROM external_accounts WHERE id = ?").bind(id).first<ExternalAccountRow>()) ?? null;
 }
 
+export async function getExternalAccountByEmail(env: RuntimeEnv, email: string): Promise<ExternalAccountRow | null> {
+  return (await env.DB.prepare("SELECT * FROM external_accounts WHERE email = ?").bind(normalizeEmail(email)).first<ExternalAccountRow>()) ?? null;
+}
+
 export async function upsertExternalAccount(
   env: RuntimeEnv,
   input: {

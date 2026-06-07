@@ -1,3 +1,4 @@
+import { connect } from "cloudflare:sockets";
 import PostalMime from "postal-mime";
 import {
   createId,
@@ -5,11 +6,13 @@ import {
   ensureMailbox,
   findThreadForHeaders,
   getDomainByName,
+  getExternalAccountByEmail,
   getMailboxByAddress,
   getSignatureForMailboxAddress,
   getThread,
   insertAttachment,
   insertMessage,
+  type ExternalAccountRow,
   MessageRow,
   normalizeAddressList,
   normalizeEmail,
@@ -51,6 +54,8 @@ type PreparedAttachment = {
   content: Uint8Array;
   r2Key: string;
 };
+
+type SmtpSecurity = "ssl" | "starttls" | "none";
 
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const MAX_TOTAL_ATTACHMENT_BYTES = 20 * 1024 * 1024;
@@ -157,6 +162,14 @@ export async function sendEmail(env: RuntimeEnv, input: SendInput): Promise<Mess
 
   const from = normalizeEmail(input.from);
   const domain = domainFromEmail(from);
+  const externalAccount = await getExternalAccountByEmail(env, from);
+  if (externalAccount) {
+    if (externalAccount.outbound_enabled !== 1) {
+      throw new ApiError(400, "external_outbound_disabled", "Outbound sending is disabled for this external account");
+    }
+    return sendExternalSmtpEmail(env, externalAccount, input);
+  }
+
   const domainRow = await getDomainByName(env, domain);
   const mailboxRow = await getMailboxByAddress(env, from);
 
@@ -285,11 +298,398 @@ export async function sendEmail(env: RuntimeEnv, input: SendInput): Promise<Mess
   return stored;
 }
 
+async function sendExternalSmtpEmail(
+  env: RuntimeEnv,
+  account: ExternalAccountRow,
+  input: SendInput
+): Promise<MessageRow> {
+  const from = normalizeEmail(account.email);
+  if (!account.smtp_host || !account.smtp_port) {
+    throw new ApiError(400, "external_smtp_missing", "SMTP host and port are required before sending from this external account");
+  }
+  if (account.auth_type !== "app_password") {
+    throw new ApiError(400, "external_auth_unsupported", "Only app-password SMTP sending is supported right now");
+  }
+
+  const to = normalizeAddressList(input.to);
+  const cc = normalizeAddressList(input.cc ?? []);
+  const bcc = normalizeAddressList(input.bcc ?? []);
+
+  if (to.length === 0) {
+    throw new ApiError(400, "recipient_missing", "At least one recipient is required");
+  }
+  if (to.length + cc.length + bcc.length > 50) {
+    throw new ApiError(400, "too_many_recipients", "Send to up to 50 recipients");
+  }
+
+  const subject = input.subject.trim();
+  const text = input.text?.trim() || htmlToText(input.html ?? "");
+  const html = input.html?.trim() || textToHtml(text);
+  const attachments = prepareOutboundAttachments(from, input.attachments ?? []);
+  const threadData = await prepareThreadHeaders(env, input.replyToThreadId ?? null, from);
+  const plannedMessageId = createId("msg");
+  const rfcMessageId = `<${plannedMessageId}@${domainFromEmail(from)}>`;
+
+  try {
+    await Promise.all(
+      attachments.map((attachment) =>
+        env.MAIL_BUCKET.put(attachment.r2Key, attachment.content, {
+          httpMetadata: {
+            contentType: attachment.contentType
+          },
+          customMetadata: {
+            messageId: plannedMessageId,
+            filename: attachment.filename,
+            direction: "outbound",
+            source: "external-smtp"
+          }
+        })
+      )
+    );
+  } catch {
+    throw new ApiError(500, "attachment_store_failed", "Attachments could not be stored in R2");
+  }
+
+  const headers: Record<string, string> = {
+    ...threadData.headers,
+    "Message-ID": rfcMessageId
+  };
+  const mime = buildMimeMessage({
+    from,
+    fromName: input.fromName ?? account.display_name,
+    to,
+    cc,
+    bcc,
+    subject,
+    text,
+    html,
+    headers,
+    attachments
+  });
+
+  try {
+    const smtp = await SmtpClient.open({
+      host: account.smtp_host,
+      port: account.smtp_port,
+      security: account.smtp_security as SmtpSecurity
+    });
+    try {
+      await smtp.authenticate(account.username || account.email, externalCredential(env, account));
+      await smtp.send(from, [...to, ...cc, ...bcc], mime);
+    } finally {
+      await smtp.quit();
+    }
+  } catch (error) {
+    await Promise.allSettled(attachments.map((attachment) => env.MAIL_BUCKET.delete(attachment.r2Key)));
+    throw error;
+  }
+
+  const stored = await insertMessage(env, {
+    id: plannedMessageId,
+    threadId: threadData.threadId,
+    direction: "outbound",
+    mailbox: threadData.replyMailbox,
+    domain: domainFromEmail(from),
+    fromAddress: from,
+    fromName: input.fromName ?? account.display_name,
+    to,
+    cc,
+    bcc,
+    subject,
+    snippet: makeSnippet(text),
+    textBody: text,
+    htmlBody: html,
+    messageId: rfcMessageId,
+    inReplyTo: headers["In-Reply-To"] ?? null,
+    referencesHeader: headers.References ?? null,
+    sentStatus: "sent",
+    sentMessageId: rfcMessageId,
+    readAt: nowIso()
+  });
+
+  for (const attachment of attachments) {
+    await insertAttachment(env, {
+      messageId: stored.id,
+      filename: attachment.filename,
+      contentType: attachment.contentType,
+      size: attachment.size,
+      r2Key: attachment.r2Key,
+      disposition: "attachment"
+    });
+  }
+
+  await recordAudit(env, "email.sent.external", stored.id, { from, to, attachments: attachments.length });
+  return stored;
+}
+
+async function prepareThreadHeaders(
+  env: RuntimeEnv,
+  replyToThreadId: string | null,
+  fallbackMailbox: string
+): Promise<{ headers: Record<string, string>; threadId: string; replyMailbox: string }> {
+  const headers: Record<string, string> = {};
+  let threadId = replyToThreadId ?? createId("thr");
+  let replyMailbox = fallbackMailbox;
+
+  if (!replyToThreadId) {
+    return { headers, threadId, replyMailbox };
+  }
+
+  const thread = await getThread(env, replyToThreadId);
+  if (thread.messages.length === 0) {
+    throw new ApiError(404, "thread_not_found", "Reply thread was not found");
+  }
+  const original = [...thread.messages].reverse().find((message) => message.message_id);
+  if (original?.message_id) {
+    headers["In-Reply-To"] = original.message_id;
+    headers.References = [original.references_header, original.message_id].filter(Boolean).join(" ");
+  }
+  const inbound = thread.messages.find((message) => message.direction === "inbound");
+  replyMailbox = inbound?.mailbox ?? fallbackMailbox;
+  threadId = replyToThreadId;
+  return { headers, threadId, replyMailbox };
+}
+
+class SmtpClient {
+  private reader: ReadableStreamDefaultReader<Uint8Array>;
+  private writer: WritableStreamDefaultWriter<Uint8Array>;
+  private buffer = new Uint8Array(0);
+
+  private constructor(private socket: Socket) {
+    this.reader = socket.readable.getReader();
+    this.writer = socket.writable.getWriter();
+  }
+
+  static async open(input: { host: string; port: number; security: SmtpSecurity }): Promise<SmtpClient> {
+    const secureTransport = input.security === "ssl" ? "on" : input.security === "starttls" ? "starttls" : "off";
+    const socket = connect(
+      { hostname: input.host, port: input.port },
+      { secureTransport, allowHalfOpen: false }
+    );
+    await socket.opened;
+    let client = new SmtpClient(socket);
+    await client.expect([220]);
+    await client.ehlo();
+
+    if (input.security === "starttls") {
+      await client.command("STARTTLS", [220]);
+      const tlsSocket = socket.startTls({ expectedServerHostname: input.host });
+      await tlsSocket.opened;
+      client.release();
+      client = new SmtpClient(tlsSocket);
+      await client.ehlo();
+    }
+
+    return client;
+  }
+
+  async authenticate(username: string, password: string): Promise<void> {
+    await this.command("AUTH LOGIN", [334]);
+    await this.command(base64Utf8(username), [334]);
+    await this.command(base64Utf8(password), [235]);
+  }
+
+  async send(from: string, recipients: string[], mime: string): Promise<void> {
+    await this.command(`MAIL FROM:<${from}>`, [250]);
+    for (const recipient of recipients) {
+      await this.command(`RCPT TO:<${recipient}>`, [250, 251]);
+    }
+    await this.command("DATA", [354]);
+    await this.write(`${dotStuff(mime)}\r\n.\r\n`);
+    await this.expect([250]);
+  }
+
+  async quit(): Promise<void> {
+    try {
+      await this.command("QUIT", [221]);
+    } catch {
+      // The server can close first; force-close below is enough.
+    }
+    this.release();
+    await this.socket.close().catch(() => undefined);
+  }
+
+  private async ehlo(): Promise<void> {
+    await this.command("EHLO omnidock.local", [250]);
+  }
+
+  private async command(command: string, expected: number[]): Promise<string[]> {
+    await this.write(`${command}\r\n`);
+    return this.expect(expected);
+  }
+
+  private async write(value: string): Promise<void> {
+    await this.writer.write(new TextEncoder().encode(value));
+  }
+
+  private async expect(expected: number[]): Promise<string[]> {
+    const lines: string[] = [];
+    for (;;) {
+      const line = await this.readLine();
+      lines.push(line);
+      const code = Number.parseInt(line.slice(0, 3), 10);
+      if (!line.startsWith(`${line.slice(0, 3)}-`)) {
+        if (!expected.includes(code)) {
+          throw new ApiError(502, "smtp_command_failed", sanitizeSmtpStatus(line));
+        }
+        return lines;
+      }
+    }
+  }
+
+  private async readLine(): Promise<string> {
+    for (;;) {
+      const index = indexOfCrlf(this.buffer);
+      if (index >= 0) {
+        const lineBytes = this.buffer.slice(0, index);
+        this.buffer = this.buffer.slice(index + 2);
+        return new TextDecoder().decode(lineBytes);
+      }
+      await this.readMore();
+    }
+  }
+
+  private async readMore(): Promise<void> {
+    const chunk = await this.reader.read();
+    if (chunk.done || !chunk.value) {
+      throw new ApiError(502, "smtp_connection_closed", "SMTP connection closed unexpectedly");
+    }
+    const merged = new Uint8Array(this.buffer.byteLength + chunk.value.byteLength);
+    merged.set(this.buffer, 0);
+    merged.set(chunk.value, this.buffer.byteLength);
+    this.buffer = merged;
+  }
+
+  private release(): void {
+    this.reader.releaseLock();
+    this.writer.releaseLock();
+  }
+}
+
 function buildObjectKey(kind: "raw" | "attachments", mailbox: string, filename: string): string {
   const safeMailbox = mailbox.replace(/[^a-z0-9@._-]/gi, "_");
   const safeFilename = filename.replace(/[^a-z0-9._-]/gi, "_").slice(0, 128);
   const date = new Date().toISOString().slice(0, 10);
   return `${kind}/${date}/${safeMailbox}/${crypto.randomUUID()}-${safeFilename}`;
+}
+
+function buildMimeMessage(input: {
+  from: string;
+  fromName?: string | null;
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  subject: string;
+  text: string;
+  html: string;
+  headers: Record<string, string>;
+  attachments: PreparedAttachment[];
+}): string {
+  const mixedBoundary = `omnidock-mixed-${crypto.randomUUID()}`;
+  const alternativeBoundary = `omnidock-alt-${crypto.randomUUID()}`;
+  const lines = [
+    `From: ${formatAddress(input.from, input.fromName)}`,
+    `To: ${input.to.map((address) => formatAddress(address)).join(", ")}`,
+    input.cc.length > 0 ? `Cc: ${input.cc.map((address) => formatAddress(address)).join(", ")}` : "",
+    `Subject: ${encodeHeader(input.subject)}`,
+    "MIME-Version: 1.0",
+    `Date: ${new Date().toUTCString()}`,
+    ...Object.entries(input.headers).map(([key, value]) => `${key}: ${sanitizeHeaderValue(value)}`),
+    input.attachments.length > 0
+      ? `Content-Type: multipart/mixed; boundary="${mixedBoundary}"`
+      : `Content-Type: multipart/alternative; boundary="${alternativeBoundary}"`,
+    "",
+    input.attachments.length > 0 ? `--${mixedBoundary}` : "",
+    input.attachments.length > 0 ? `Content-Type: multipart/alternative; boundary="${alternativeBoundary}"` : "",
+    input.attachments.length > 0 ? "" : "",
+    `--${alternativeBoundary}`,
+    'Content-Type: text/plain; charset="UTF-8"',
+    "Content-Transfer-Encoding: base64",
+    "",
+    wrapBase64(base64Utf8(input.text || htmlToText(input.html))),
+    `--${alternativeBoundary}`,
+    'Content-Type: text/html; charset="UTF-8"',
+    "Content-Transfer-Encoding: base64",
+    "",
+    wrapBase64(base64Utf8(input.html || textToHtml(input.text))),
+    `--${alternativeBoundary}--`
+  ].filter((line, index, all) => line !== "" || all[index - 1] !== "");
+
+  for (const attachment of input.attachments) {
+    lines.push(
+      `--${mixedBoundary}`,
+      `Content-Type: ${sanitizeHeaderValue(attachment.contentType)}; name="${escapeHeaderParam(attachment.filename)}"`,
+      "Content-Transfer-Encoding: base64",
+      `Content-Disposition: attachment; filename="${escapeHeaderParam(attachment.filename)}"`,
+      "",
+      wrapBase64(bytesToBase64(attachment.content))
+    );
+  }
+
+  if (input.attachments.length > 0) {
+    lines.push(`--${mixedBoundary}--`);
+  }
+
+  return lines.filter((line) => line !== undefined).join("\r\n");
+}
+
+function formatAddress(email: string, name?: string | null): string {
+  const cleanEmail = normalizeEmail(email);
+  const cleanName = name?.trim();
+  return cleanName ? `${encodeHeader(cleanName)} <${cleanEmail}>` : cleanEmail;
+}
+
+function encodeHeader(value: string): string {
+  const clean = sanitizeHeaderValue(value);
+  return /^[\x20-\x7e]*$/.test(clean) ? clean : `=?UTF-8?B?${base64Utf8(clean)}?=`;
+}
+
+function sanitizeHeaderValue(value: string): string {
+  return value.replace(/[\r\n]+/g, " ").trim();
+}
+
+function escapeHeaderParam(value: string): string {
+  return sanitizeHeaderValue(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+function wrapBase64(value: string): string {
+  return value.replace(/.{1,76}/g, "$&\r\n").trimEnd();
+}
+
+function base64Utf8(value: string): string {
+  return bytesToBase64(new TextEncoder().encode(value));
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (let index = 0; index < bytes.byteLength; index += 1) {
+    binary += String.fromCharCode(bytes[index]);
+  }
+  return btoa(binary);
+}
+
+function dotStuff(value: string): string {
+  return value.replace(/\r?\n/g, "\r\n").replace(/^\./gm, "..");
+}
+
+function indexOfCrlf(bytes: Uint8Array): number {
+  for (let index = 0; index < bytes.byteLength - 1; index += 1) {
+    if (bytes[index] === 13 && bytes[index + 1] === 10) return index;
+  }
+  return -1;
+}
+
+function sanitizeSmtpStatus(value: string): string {
+  return value.replace(/^\d{3}[ -]?/, "").slice(0, 220) || "SMTP command failed";
+}
+
+function externalCredential(env: RuntimeEnv, account: ExternalAccountRow): string {
+  const secretName = (account.credential_secret_name || account.email).trim();
+  const value = (env as unknown as Record<string, unknown>)[secretName];
+  if (typeof value !== "string" || !value.trim()) {
+    throw new ApiError(409, "external_secret_missing", `Add a Worker secret named ${secretName} with this account's app password.`);
+  }
+  return value.trim();
 }
 
 function addressListFromParsed(value: unknown, fallback: string): string[] {

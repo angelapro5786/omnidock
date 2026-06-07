@@ -1797,10 +1797,10 @@ button:hover:not(:disabled) {
 }
 
 .contact-row strong,
-.contact-row span,
-.signature-mailbox span,
+.contact-row span:not(.status-pill),
+.signature-mailbox span:not(.status-pill),
 .external-account-row strong,
-.external-account-row span {
+.external-account-row span:not(.status-pill) {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1814,9 +1814,21 @@ button:hover:not(:disabled) {
 
 .contact-row span,
 .contact-row b,
-.external-account-row span {
+.external-account-row span:not(.status-pill) {
   color: var(--muted);
   font: 11px/1.2 var(--mono);
+}
+
+.external-account-row .status-pill {
+  display: inline-flex;
+  justify-self: end;
+  align-self: center;
+  min-width: max-content;
+  max-width: none;
+  height: 26px;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
 }
 
 .signature-editor {

@@ -361,6 +361,7 @@ function AppContent() {
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [thread, setThread] = useState<ThreadPayload | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [syncLog, setSyncLog] = useState("Ready");
   const [busy, setBusy] = useState(false);
   const [composeOpen, setComposeOpen] = useState(false);
   const externalSyncingIds = useRef<Set<string>>(new Set());
@@ -394,6 +395,7 @@ function AppContent() {
     setSelectedMailboxId(null);
     setSelectedBucketId(null);
     setFolderStats({});
+    setSyncLog("Locked");
     setComposeOpen(false);
   }, []);
 
@@ -530,15 +532,21 @@ function AppContent() {
     if (externalSyncingIds.current.has(selectedExternalAccount.id)) return;
 
     externalSyncingIds.current.add(selectedExternalAccount.id);
+    setSyncLog(`Syncing ${selectedExternalAccount.email} old mail...`);
     setNotice(`Syncing old emails for ${selectedExternalAccount.email}...`);
     void syncExternalHistory(api, selectedExternalAccount.id)
       .then(async (result) => {
         await loadBootstrap();
         await loadThreads({ preserveSelection: true });
         const moreText = result.hasMore ? " More mail remains; OmniDock will continue on the next sync." : "";
+        setSyncLog(`${selectedExternalAccount.email}: ${result.imported} imported, ${result.skipped} skipped`);
         setNotice(`External mail synced: ${result.imported} imported, ${result.skipped} skipped.${moreText}`);
       })
-      .catch((error) => setNotice(readError(error)))
+      .catch((error) => {
+        const message = readError(error);
+        setSyncLog(`${selectedExternalAccount.email}: ${message}`);
+        setNotice(message);
+      })
       .finally(() => {
         externalSyncingIds.current.delete(selectedExternalAccount.id);
       });
@@ -795,6 +803,66 @@ function AppContent() {
     setNotice(action === "archive" ? "Thread archived" : action === "delete" ? "Thread deleted" : "Thread restored");
   }
 
+  async function syncEverything() {
+    if (!api) return;
+
+    setBusy(true);
+    setNotice(null);
+    let imported = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+
+    try {
+      setSyncLog("Sync started...");
+
+      try {
+        setSyncLog("Cloudflare inventory syncing...");
+        await api.syncCloudflare();
+        setSyncLog("Cloudflare inventory updated");
+      } catch (error) {
+        const message = readError(error);
+        errors.push(`Cloudflare: ${message}`);
+        setSyncLog(`Cloudflare skipped: ${message}`);
+      }
+
+      const latest = await api.bootstrap();
+      setBootstrap(latest);
+      const inboundAccounts = (latest.externalAccounts ?? []).filter((account) => account.inbound_enabled === 1);
+
+      if (inboundAccounts.length === 0) {
+        setSyncLog("No external inboxes to pull");
+      }
+
+      for (const account of inboundAccounts) {
+        try {
+          setSyncLog(`${externalProviderLabel(account.provider)} ${account.email}: pulling mail...`);
+          const result = await syncExternalHistory(api, account.id, (message) => setSyncLog(`${account.email}: ${message}`));
+          imported += result.imported;
+          skipped += result.skipped;
+          const moreText = result.hasMore ? " more remains" : "done";
+          setSyncLog(`${account.email}: ${result.imported} imported, ${result.skipped} skipped, ${moreText}`);
+        } catch (error) {
+          const message = readError(error);
+          errors.push(`${account.email}: ${message}`);
+          setSyncLog(`${account.email}: ${message}`);
+        }
+      }
+
+      await loadBootstrap();
+      await loadThreads({ preserveSelection: true });
+
+      if (errors.length > 0) {
+        setNotice(`Sync finished with ${errors.length} warning${errors.length === 1 ? "" : "s"}: ${errors.join(" | ")}`);
+        setSyncLog(`Sync finished: ${imported} imported, ${skipped} skipped, ${errors.length} warning${errors.length === 1 ? "" : "s"}`);
+      } else {
+        setNotice(`Sync complete: ${imported} imported, ${skipped} skipped`);
+        setSyncLog(`Sync complete: ${imported} imported, ${skipped} skipped`);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="app-shell">
       <Sidebar
@@ -872,29 +940,9 @@ function AppContent() {
           )}
           <div className="topbar-actions">
             <PaletteChooser value={palette} onChange={setPalette} />
-            <button className="button ghost" onClick={() => void loadBootstrap()} disabled={busy} title="Refresh">
-              <RefreshCw size={16} />
-              Refresh
-            </button>
-            <button
-              className="button"
-              onClick={async () => {
-                if (!api) return;
-                setBusy(true);
-                try {
-                  await api.syncCloudflare();
-                  await loadBootstrap();
-                  setNotice("Cloudflare sync complete");
-                } catch (error) {
-                  setNotice(readError(error));
-                } finally {
-                  setBusy(false);
-                }
-              }}
-              disabled={busy}
-            >
-              <ShieldCheck size={16} />
-              Sync Cloudflare
+            <button className="button" onClick={() => void syncEverything()} disabled={busy} title="Sync Cloudflare and pull external mail">
+              {busy ? <Loader2 className="spin-icon" size={16} /> : <ShieldCheck size={16} />}
+              Sync
             </button>
             <button className="button primary" onClick={() => setComposeOpen(true)}>
               <Plus size={16} />
@@ -966,6 +1014,7 @@ function AppContent() {
               api={api}
               thread={thread}
               mailboxes={mailboxes}
+              externalAccounts={externalAccounts}
               folder={folder}
               onSent={async () => {
                 if (activeThreadId) await loadThread(activeThreadId);
@@ -978,6 +1027,10 @@ function AppContent() {
       </main>
 
       <footer className="statusbar">
+        <span className="statusbar-log">
+          {busy ? <Loader2 className="spin-icon" size={13} /> : <TerminalSquare size={13} />}
+          {syncLog}
+        </span>
         <span>
           <TerminalSquare size={13} />
           omnidock
@@ -992,13 +1045,14 @@ function AppContent() {
         <ComposeDialog
           api={api}
           mailboxes={mailboxes}
+          externalAccounts={externalAccounts}
           contacts={contacts}
           onClose={() => setComposeOpen(false)}
           onSent={async () => {
             setComposeOpen(false);
             await loadThreads();
           }}
-          initialFrom={activeMailbox?.address ?? null}
+          initialFrom={activeMailbox?.address ?? activeExternalAccount?.email ?? null}
         />
       ) : null}
     </div>
@@ -2742,7 +2796,7 @@ function ExternalAccountsView({
       await onChange();
       if (result.account.inbound_enabled === 1) {
         onNotice(`External account saved. Syncing old emails for ${result.account.email}...`);
-        const sync = await syncExternalHistory(api, result.account.id);
+        const sync = await syncExternalHistory(api, result.account.id, (message) => onNotice(`${result.account.email}: ${message}`));
         await onChange();
         const moreText = sync.hasMore ? " More mail remains; OmniDock will continue on the next sync." : "";
         onNotice(`External mail synced: ${sync.imported} imported, ${sync.skipped} skipped.${moreText}`);
@@ -3006,7 +3060,34 @@ function externalCredentialSecretName(email: string): string {
   return email.trim().toLowerCase();
 }
 
-async function syncExternalHistory(api: ApiClient, accountId: string): Promise<{
+function sendableFromOptions(mailboxes: MailboxRow[], externalAccounts: ExternalAccountRow[]): SelectOption[] {
+  const seen = new Set<string>();
+  const options: SelectOption[] = [];
+
+  for (const mailbox of mailboxes) {
+    if (mailbox.enabled !== 1) continue;
+    const address = mailbox.address.toLowerCase();
+    if (seen.has(address)) continue;
+    seen.add(address);
+    options.push({ value: mailbox.address, label: mailbox.address, description: "OmniDock mailbox" });
+  }
+
+  for (const account of externalAccounts) {
+    if (account.outbound_enabled !== 1) continue;
+    const address = account.email.toLowerCase();
+    if (seen.has(address)) continue;
+    seen.add(address);
+    options.push({
+      value: account.email,
+      label: account.email,
+      description: `${externalProviderLabel(account.provider)} external`
+    });
+  }
+
+  return options;
+}
+
+async function syncExternalHistory(api: ApiClient, accountId: string, onProgress?: (message: string) => void): Promise<{
   imported: number;
   skipped: number;
   checked: number;
@@ -3018,11 +3099,13 @@ async function syncExternalHistory(api: ApiClient, accountId: string): Promise<{
   let hasMore = false;
 
   for (let round = 0; round < 4; round += 1) {
+    onProgress?.(`pulling batch ${round + 1}...`);
     const result = await api.syncExternalAccount(accountId, 300);
     imported += result.imported;
     skipped += result.skipped;
     checked += result.checked;
     hasMore = result.hasMore;
+    onProgress?.(`batch ${round + 1}: ${result.imported} imported, ${result.skipped} skipped`);
     if (!result.hasMore) break;
   }
 
@@ -4006,6 +4089,7 @@ function ThreadDetail({
   api,
   thread,
   mailboxes,
+  externalAccounts,
   folder,
   onSent,
   onThreadAction
@@ -4013,6 +4097,7 @@ function ThreadDetail({
   api: ApiClient | null;
   thread: ThreadPayload | null;
   mailboxes: MailboxRow[];
+  externalAccounts: ExternalAccountRow[];
   folder: FolderKey;
   onSent: () => Promise<void>;
   onThreadAction: (action: "archive" | "unarchive" | "delete") => Promise<void>;
@@ -4027,17 +4112,17 @@ function ThreadDetail({
   const dialog = useAppDialog();
   const firstMessage = thread?.messages[0] ?? null;
   const lastInbound = [...(thread?.messages ?? [])].reverse().find((message) => message.direction === "inbound");
-  const sendableMailboxes = useMemo(() => mailboxes.filter((mailbox) => mailbox.enabled === 1), [mailboxes]);
-  const preferredFrom = firstMessage?.mailbox ?? sendableMailboxes[0]?.address ?? "";
+  const fromOptions = useMemo(() => sendableFromOptions(mailboxes, externalAccounts), [externalAccounts, mailboxes]);
+  const preferredFrom = firstMessage?.mailbox ?? fromOptions[0]?.value ?? "";
   const isArchived = Boolean(firstMessage?.archived_at);
 
   useEffect(() => {
-    if (preferredFrom && sendableMailboxes.some((mailbox) => mailbox.address === preferredFrom)) {
+    if (preferredFrom && fromOptions.some((option) => option.value === preferredFrom)) {
       setFrom(preferredFrom);
-    } else if (!from || !sendableMailboxes.some((mailbox) => mailbox.address === from)) {
-      setFrom(sendableMailboxes[0]?.address ?? "");
+    } else if (!from || !fromOptions.some((option) => option.value === from)) {
+      setFrom(fromOptions[0]?.value ?? "");
     }
-  }, [firstMessage?.thread_id, from, preferredFrom, sendableMailboxes]);
+  }, [firstMessage?.thread_id, from, preferredFrom, fromOptions]);
 
   useEffect(() => {
     setReplyDraft({ html: "", text: "" });
@@ -4194,7 +4279,7 @@ function ThreadDetail({
             <CustomSelect
               value={from}
               onChange={setFrom}
-              options={sendableMailboxes.map((mailbox) => ({ value: mailbox.address, label: mailbox.address }))}
+              options={fromOptions}
             />
           </label>
           <span>
@@ -4243,6 +4328,7 @@ function ThreadDetail({
 function ComposeDialog({
   api,
   mailboxes,
+  externalAccounts,
   contacts,
   onClose,
   onSent,
@@ -4250,15 +4336,16 @@ function ComposeDialog({
 }: {
   api: ApiClient | null;
   mailboxes: MailboxRow[];
+  externalAccounts: ExternalAccountRow[];
   contacts: ContactRow[];
   onClose: () => void;
   onSent: () => Promise<void>;
   initialFrom: string | null;
 }) {
-  const sendableMailboxes = useMemo(() => mailboxes.filter((mailbox) => mailbox.enabled === 1), [mailboxes]);
-  const initialSendableFrom = sendableMailboxes.some((mailbox) => mailbox.address === initialFrom)
+  const fromOptions = useMemo(() => sendableFromOptions(mailboxes, externalAccounts), [externalAccounts, mailboxes]);
+  const initialSendableFrom = fromOptions.some((option) => option.value === initialFrom)
     ? initialFrom ?? ""
-    : sendableMailboxes[0]?.address ?? "";
+    : fromOptions[0]?.value ?? "";
   const [from, setFrom] = useState(initialSendableFrom);
   const [to, setTo] = useState("");
   const [subject, setSubject] = useState("");
@@ -4281,10 +4368,10 @@ function ComposeDialog({
   );
 
   useEffect(() => {
-    if (!from || !sendableMailboxes.some((mailbox) => mailbox.address === from)) {
-      setFrom(sendableMailboxes[0]?.address ?? "");
+    if (!from || !fromOptions.some((option) => option.value === from)) {
+      setFrom(fromOptions[0]?.value ?? "");
     }
-  }, [from, sendableMailboxes]);
+  }, [from, fromOptions]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -4321,7 +4408,7 @@ function ComposeDialog({
           <CustomSelect
             value={from}
             onChange={setFrom}
-            options={sendableMailboxes.map((mailbox) => ({ value: mailbox.address, label: mailbox.address }))}
+            options={fromOptions}
           />
         </label>
         <label>
