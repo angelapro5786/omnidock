@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OmniDock - Open-source Cloudflare Email Operations</title>
+    <meta
+      name="description"
+      content="OmniDock is an open-source Cloudflare Workers email operations dashboard for Email Routing, Email Sending, D1, R2, Gmail sync, contacts, signatures, logs, and bucket management."
+    />
+    <meta
+      name="keywords"
+      content="OmniDock, Cloudflare email dashboard, Cloudflare Workers email, Email Routing, Email Sending, D1, R2, Gmail sync, self hosted email, support inbox"
+    />
+    <meta name="theme-color" content="#0f766e" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="OmniDock - Open-source Cloudflare Email Operations" />
+    <meta
+      property="og:description"
+      content="Run support inboxes, external email sync, R2 buckets, contacts, signatures, logs, and domain routing from one Cloudflare-native dashboard."
+    />
+    <meta property="og:image" content="./brand/omnidock-social-preview.svg" />
+    <meta property="og:site_name" content="OmniDock" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="OmniDock - Cloudflare email operations dashboard" />
+    <meta
+      name="twitter:description"
+      content="A self-hosted, open-source Cloudflare Workers dashboard for email, inbox sync, contacts, logs, and R2 files."
+    />
+    <meta name="twitter:image" content="./brand/omnidock-social-preview.svg" />
+    <link rel="icon" href="./brand/omnidock-social-preview.svg" type="image/svg+xml" />
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #122033;
+        --muted: #53657d;
+        --line: #c9d5e2;
+        --panel: #f7fafc;
+        --panel-strong: #edf4f8;
+        --brand: #0f766e;
+        --brand-dark: #115e59;
+        --blue: #2563eb;
+        --amber: #b45309;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-width: 320px;
+        background: #e8f0f5;
+        color: var(--ink);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      a {
+        color: inherit;
+      }
+
+      .shell {
+        width: min(1160px, calc(100% - 32px));
+        margin: 0 auto;
+      }
+
+      .nav {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 18px 0;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-width: 0;
+        font-weight: 800;
+      }
+
+      .mark {
+        width: 34px;
+        height: 34px;
+        border: 1px solid rgba(15, 118, 110, 0.32);
+        background: #ffffff;
+      }
+
+      .nav-links {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 38px;
+        padding: 0 14px;
+        border: 1px solid var(--line);
+        background: #ffffff;
+        color: var(--ink);
+        text-decoration: none;
+        font-weight: 750;
+      }
+
+      .button.primary {
+        border-color: var(--brand);
+        background: var(--brand);
+        color: #ffffff;
+      }
+
+      .hero {
+        position: relative;
+        overflow: hidden;
+        border: 1px solid #9fb7c9;
+        background:
+          linear-gradient(rgba(9, 24, 38, 0.62), rgba(9, 24, 38, 0.76)),
+          url("./screenshots/omnidock-inbox-linux.png") center / cover;
+      }
+
+      .hero-inner {
+        width: min(840px, 100%);
+        padding: 88px 34px 116px;
+        color: #ffffff;
+      }
+
+      .eyebrow {
+        margin: 0 0 14px;
+        color: #a7f3d0;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 13px;
+        font-weight: 800;
+        letter-spacing: 0;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(42px, 8vw, 82px);
+        line-height: 0.95;
+        letter-spacing: 0;
+      }
+
+      .lead {
+        max-width: 760px;
+        margin: 22px 0 0;
+        color: #e4edf4;
+        font-size: 20px;
+        line-height: 1.55;
+      }
+
+      .hero-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 30px;
+      }
+
+      .hero-actions .button {
+        min-height: 44px;
+      }
+
+      .section {
+        padding: 34px 0;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .feature,
+      .wide-panel {
+        border: 1px solid var(--line);
+        background: #ffffff;
+        padding: 18px;
+      }
+
+      .feature h2,
+      .wide-panel h2 {
+        margin: 0 0 8px;
+        font-size: 18px;
+      }
+
+      .feature p,
+      .wide-panel p,
+      .wide-panel li {
+        color: var(--muted);
+        line-height: 1.55;
+      }
+
+      .feature p,
+      .wide-panel p {
+        margin: 0;
+      }
+
+      .screens {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+      }
+
+      .shot {
+        overflow: hidden;
+        border: 1px solid var(--line);
+        background: #ffffff;
+      }
+
+      .shot img {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+
+      .shot figcaption {
+        padding: 12px 14px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .steps {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 16px;
+      }
+
+      .step {
+        border: 1px solid var(--line);
+        background: var(--panel);
+        padding: 16px;
+      }
+
+      .step strong {
+        display: block;
+        margin-bottom: 6px;
+      }
+
+      .step span {
+        color: var(--muted);
+        line-height: 1.45;
+      }
+
+      .footer {
+        border-top: 1px solid var(--line);
+        padding: 24px 0 36px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      @media (max-width: 860px) {
+        .nav,
+        .nav-links,
+        .hero-actions {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        .hero-inner {
+          padding: 64px 22px 88px;
+        }
+
+        .grid,
+        .screens,
+        .steps {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "OmniDock",
+        "applicationCategory": "BusinessApplication",
+        "operatingSystem": "Cloudflare Workers",
+        "description": "Open-source Cloudflare Workers email operations dashboard for Email Routing, Email Sending, D1, R2, Gmail sync, contacts, signatures, logs, and bucket management.",
+        "license": "https://opensource.org/licenses/MIT",
+        "url": "https://ufukayyildiz.github.io/omnidock/",
+        "codeRepository": "https://github.com/ufukayyildiz/omnidock"
+      }
+    </script>
+  </head>
+  <body>
+    <header class="shell nav">
+      <a class="brand" href="./" aria-label="OmniDock home">
+        <img class="mark" src="./brand/omnidock-social-preview.svg" alt="" />
+        <span>OmniDock</span>
+      </a>
+      <nav class="nav-links" aria-label="Primary">
+        <a class="button" href="https://github.com/ufukayyildiz/omnidock">GitHub</a>
+        <a class="button" href="./GITHUB_SEO.md">SEO checklist</a>
+        <a class="button primary" href="https://github.com/ufukayyildiz/omnidock#installation">Install</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="shell hero">
+        <div class="hero-inner">
+          <p class="eyebrow">Cloudflare-native email operations</p>
+          <h1>OmniDock</h1>
+          <p class="lead">
+            An open-source dashboard for support inboxes, domain routing, Cloudflare Email
+            Sending, D1 storage, R2 files, Gmail sync, contacts, signatures, logs, and operational
+            email workflows.
+          </p>
+          <div class="hero-actions">
+            <a class="button primary" href="https://github.com/ufukayyildiz/omnidock">View source</a>
+            <a class="button" href="https://github.com/ufukayyildiz/omnidock#installation">
+              Read install guide
+            </a>
+          </div>
+        </div>
+      </section>
+
+      <section class="shell section grid" aria-label="Highlights">
+        <article class="feature">
+          <h2>Email dashboard</h2>
+          <p>
+            Manage inbox, sent, and archive views across Cloudflare-managed mailboxes and external
+            accounts from a single operator interface.
+          </p>
+        </article>
+        <article class="feature">
+          <h2>Cloudflare stack</h2>
+          <p>
+            Built for Workers, Email Routing, Email Sending, D1, R2, secrets, bindings, and
+            deployment workflows that stay inside your own Cloudflare account.
+          </p>
+        </article>
+        <article class="feature">
+          <h2>R2 file workflows</h2>
+          <p>
+            Browse buckets, preview files, upload objects, download assets, delete safely, and index
+            text for document search.
+          </p>
+        </article>
+      </section>
+
+      <section class="shell section screens" aria-label="Screenshots">
+        <figure class="shot">
+          <img src="./screenshots/omnidock-inbox-linux.png" alt="OmniDock inbox interface" />
+          <figcaption>Linux-style inbox with mailbox switching, search, sync, and thread preview.</figcaption>
+        </figure>
+        <figure class="shot">
+          <img src="./screenshots/omnidock-rules-linux.png" alt="OmniDock routing rules interface" />
+          <figcaption>Domain rules, routing status, default mailbox controls, contacts, and signatures.</figcaption>
+        </figure>
+      </section>
+
+      <section class="shell section wide-panel">
+        <h2>What OmniDock runs</h2>
+        <p>
+          OmniDock is designed for teams that want a self-hosted email operations console on
+          Cloudflare rather than a hosted SaaS inbox. It keeps secrets in Worker configuration,
+          stores operational data in D1, keeps raw messages and attachments in R2, and exposes a
+          focused admin UI for day-to-day support and file workflows.
+        </p>
+        <div class="steps">
+          <div class="step">
+            <strong>1. Bind</strong>
+            <span>Connect D1, R2, Email Sending, and required Worker secrets.</span>
+          </div>
+          <div class="step">
+            <strong>2. Configure</strong>
+            <span>Add domains, mailbox addresses, contacts, signatures, and optional Gmail accounts.</span>
+          </div>
+          <div class="step">
+            <strong>3. Sync</strong>
+            <span>Pull external messages, sync Cloudflare routing state, and log operational actions.</span>
+          </div>
+          <div class="step">
+            <strong>4. Operate</strong>
+            <span>Reply, archive, search, inspect attachments, and manage R2 bucket files.</span>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="shell footer">
+      OmniDock is open source and self-hosted on Cloudflare Workers. GitHub Pages hosts this static
+      project page only; the working admin app runs on your Cloudflare Worker.
+    </footer>
+  </body>
+</html>

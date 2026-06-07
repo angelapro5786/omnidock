@@ -60,7 +60,7 @@ OmniDock is not an IMAP/POP3 server and does not replace a full hosted mailbox p
 | Contacts | Manual contacts, CSV/TXT/VCF import, phone, company, tags, notes, edit/delete |
 | Signatures | Mailbox-based rich signatures with text styling and links |
 | External accounts | Gmail and custom IMAP/SMTP profiles with Worker-secret credential references |
-| Buckets | Browse R2 folders, preview files, upload, download, delete, search paths and text indexes |
+| Buckets | Browse R2 folders, preview PDF/image/text files, upload, download, delete, search paths, searchable PDFs, and saved OCR/text indexes |
 | Logs | Audit log table for sync, sending, errors, warnings, exports, and cleanup |
 | UI | Linux, Ubuntu, Fedora, Plasma, and Graphite palettes with compact desktop layout |
 
@@ -82,7 +82,7 @@ OmniDock is not an IMAP/POP3 server and does not replace a full hosted mailbox p
 - Import contacts manually or from CSV, TXT, and VCF files; edit contacts one by one; store phone, company, tags, and notes.
 - Manage mailbox-specific rich signatures with text style and links.
 - Add external account profiles for Gmail, Outlook, Yahoo, iCloud, or custom IMAP/SMTP settings. OmniDock stores the Worker secret name, not the credential value.
-- Browse one or more configured R2 buckets from the sidebar, open folders, preview objects, upload files, download files, delete files, and save searchable text indexes for scanned documents without automatic AI spend.
+- Browse one or more configured R2 buckets from the sidebar, open folders, preview PDF/image/text objects, upload files with progress, download files, delete files, and save searchable OCR/text indexes for scanned documents without automatic AI spend.
 - Review app activity in Logs, export logs, and delete logs from D1.
 - Choose between five UI palettes: Linux, Ubuntu, Fedora, Plasma, and Graphite.
 - Set a default mailbox and customize automatic refresh timing.
@@ -351,6 +351,8 @@ For Gmail app passwords, create a Worker secret whose name is the Gmail address.
 
 External inbox pulling is resumable. Pressing `Sync` queues D1-backed background jobs, starts a short immediate Worker run, and then the scheduled Worker continues jobs every minute. Each scheduled run is capped at 15 minutes. If a mailbox is too large to finish in one run, OmniDock keeps the folder and IMAP UID cursor in D1; pressing `Sync` again continues from the saved cursor instead of starting over. Refreshing or closing the dashboard does not cancel the queued pull.
 
+External sending uses the configured SMTP profile for that account. Gmail, Outlook, Yahoo, iCloud, and custom providers can each have inbound sync, outbound send, or both enabled. Provider credentials stay in Worker secrets; the UI stores only the account metadata needed to connect.
+
 ### Other Settings
 
 Other Settings controls automatic refresh. The default is 10 seconds and can be changed from the UI.
@@ -360,6 +362,15 @@ Other Settings controls automatic refresh. The default is 10 seconds and can be 
 The Buckets sidebar opens a dropdown of configured R2 buckets. `MAIL_BUCKET` is always the primary mail bucket. Extra buckets from `OMNIDOCK_EXTRA_R2_BUCKETS` appear in the same dropdown with their real bucket names. You can browse folder prefixes, preview supported file types, upload files, download objects, and delete objects.
 
 Bucket search reads filenames, paths, supported text files, extractable PDF text, and saved object text indexes. Scanned PDFs and images do not contain searchable text by default. To avoid surprise AI costs, OmniDock does not run automatic OCR during every search. Open an object, choose `Index text`, and paste OCR text from your preferred local or external OCR tool. OmniDock stores that text in D1 and future searches find the object without re-running OCR.
+
+Preview support is built for common operator workflows:
+
+- Images open inline for quick visual checks.
+- PDFs open in an embedded preview frame.
+- Text files can be inspected without downloading.
+- Unsupported files remain downloadable.
+- R2 uploads show progress and per-file status so large batches are easier to monitor.
+- R2 deletes use an in-app confirmation dialog instead of browser-native alerts.
 
 ## Custom Domain
 
@@ -549,7 +560,7 @@ Open-source Cloudflare email dashboard for Workers, Email Routing, Email Sending
 Recommended topics:
 
 ```text
-cloudflare cloudflare-workers cloudflare-email-routing cloudflare-email-sending cloudflare-d1 cloudflare-r2 email-dashboard support-inbox self-hosted-email email-routing email-sending r2-storage d1-database gmail-sync imap smtp react typescript serverless open-source
+cloudflare cloudflare-workers cloudflare-email-routing cloudflare-email-sending cloudflare-d1 cloudflare-r2 email-dashboard support-inbox self-hosted-email email-routing email-sending r2-storage r2-bucket-manager d1-database gmail-sync imap smtp pdf-preview ocr-indexing react typescript serverless open-source
 ```
 
 Recommended website URL:
@@ -587,11 +598,11 @@ OmniDock is a self-hosted Cloudflare Workers email dashboard for Email Routing, 
 Short product pitch:
 
 ```text
-OmniDock turns Cloudflare Workers, Email Routing, Email Sending, D1, and R2 into a private email operations dashboard for support inboxes, multi-domain routing, external account sync, contacts, signatures, attachments, logs, and R2 file workflows.
+OmniDock turns Cloudflare Workers, Email Routing, Email Sending, D1, and R2 into a private email operations dashboard for support inboxes, multi-domain routing, Gmail and external IMAP/SMTP sync, contacts, signatures, attachments, logs, R2 bucket management, file preview, upload workflows, and OCR-ready text search.
 ```
 
 Search phrases this README intentionally covers:
 
 ```text
-Cloudflare email dashboard, Cloudflare Workers email app, Cloudflare Email Routing UI, Cloudflare Email Sending dashboard, open-source support inbox, self-hosted email management, D1 email database, R2 attachment storage, R2 file manager, Gmail IMAP sync, serverless email dashboard, multi-domain email inbox.
+Cloudflare email dashboard, Cloudflare Workers email app, Cloudflare Email Routing UI, Cloudflare Email Sending dashboard, open-source support inbox, self-hosted email management, D1 email database, R2 attachment storage, R2 file manager, R2 bucket manager, Gmail IMAP sync, external SMTP sending, PDF preview, attachment preview, OCR text indexing, serverless email dashboard, multi-domain email inbox.
 ```
