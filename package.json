@@ -11,6 +11,8 @@
     "cloudflare-email-sending",
     "cloudflare-d1",
     "cloudflare-r2",
+    "workers-ai",
+    "ocr-indexing",
     "email-dashboard",
     "support-inbox",
     "self-hosted-email",
@@ -40,13 +42,16 @@
   },
   "cloudflare": {
     "label": "OmniDock",
-    "products": ["Workers", "D1", "R2"],
+    "products": ["Workers", "D1", "R2", "Workers AI"],
     "bindings": {
       "DB": {
         "description": "Required D1 database. Keep the generated `database_id` in installed copies so updates reuse the same database."
       },
       "MAIL_BUCKET": {
         "description": "Required R2 bucket for raw messages and attachments. Keep the generated bucket name in installed copies so updates reuse the same bucket."
+      },
+      "AI": {
+        "description": "Workers AI binding used by Index Engine for document-to-markdown and OCR-style text extraction."
       }
     }
   },

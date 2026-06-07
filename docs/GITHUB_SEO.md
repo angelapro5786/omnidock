@@ -7,7 +7,7 @@ Use this file when publishing OmniDock as a public GitHub repository. GitHub rep
 Description:
 
 ```text
-Open-source Cloudflare email dashboard for Workers, Email Routing, Email Sending, D1, R2 bucket management, support inboxes, Gmail sync, external IMAP/SMTP, previews, uploads, contacts, signatures, logs, and OCR-ready search.
+Open-source Cloudflare email dashboard for Workers, Email Routing, Email Sending, D1, R2 bucket management, Workers AI document indexing, support inboxes, Gmail sync, external IMAP/SMTP, previews, uploads, contacts, signatures, logs, and indexed OCR search.
 ```
 
 Website:
@@ -25,6 +25,7 @@ cloudflare-email-routing
 cloudflare-email-sending
 cloudflare-d1
 cloudflare-r2
+workers-ai
 email-dashboard
 support-inbox
 self-hosted-email
@@ -39,6 +40,7 @@ imap
 smtp
 pdf-preview
 ocr-indexing
+document-search
 serverless
 react
 typescript
@@ -70,7 +72,8 @@ The README should naturally include these phrases without keyword stuffing:
 - R2 upload and download workflow
 - PDF preview
 - attachment preview
-- OCR-ready text indexing
+- Workers AI OCR/document indexing
+- D1-backed R2 text search
 - D1 email database
 - R2 attachment storage
 

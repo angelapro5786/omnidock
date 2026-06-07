@@ -1361,6 +1361,18 @@ button:hover:not(:disabled) {
   min-width: 0;
 }
 
+.bucket-panel-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+}
+
+.bucket-panel-actions > svg {
+  flex: 0 0 auto;
+}
+
 .bucket-panel header span,
 .bucket-panel header small {
   display: block;
@@ -1771,6 +1783,130 @@ button:hover:not(:disabled) {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
+}
+
+.index-engine-shell {
+  height: calc(100vh - 120px);
+  min-height: 0;
+  overflow: auto;
+}
+
+.index-engine-grid {
+  display: grid;
+  grid-template-columns: minmax(340px, 1fr) minmax(340px, 1fr);
+  gap: 12px;
+  min-width: 0;
+}
+
+.index-engine-card {
+  min-width: 0;
+}
+
+.index-engine-card.wide {
+  grid-column: 1 / -1;
+}
+
+.index-engine-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.index-engine-hero {
+  gap: 16px;
+}
+
+.index-progress {
+  height: 9px;
+  margin: 0;
+}
+
+.index-engine-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.index-counter-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.index-counter,
+.bucket-index-row,
+.index-engine-note {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--control);
+}
+
+.index-counter {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+}
+
+.index-counter span,
+.bucket-index-row small {
+  color: var(--muted);
+  font: 11px/1 var(--mono);
+  text-transform: uppercase;
+}
+
+.index-counter strong {
+  overflow: hidden;
+  font-size: 18px;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.index-engine-note {
+  padding: 9px 10px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.index-engine-note.ok {
+  border-color: var(--selected-line);
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+.index-engine-note.warn {
+  border-color: var(--warn-line);
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+
+.bucket-index-list {
+  display: grid;
+  gap: 7px;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.bucket-index-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+.bucket-index-row span {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bucket-index-row.muted {
+  opacity: 0.72;
 }
 
 .routing-summary-item {

@@ -12,6 +12,7 @@ import {
   FileText,
   FileUp,
   FolderGit2,
+  FolderPlus,
   Inbox,
   Italic,
   Loader2,
@@ -60,6 +61,8 @@ import {
   AuditLogRow,
   AttachmentRow,
   BootstrapPayload,
+  BucketIndexPayload,
+  BucketIndexJobRow,
   BucketFolderRow,
   BucketObjectRow,
   BucketRow,
@@ -92,7 +95,7 @@ const folders: { key: FolderKey; label: string; icon: typeof Inbox }[] = [
   { key: "archive", label: "Archive", icon: Archive }
 ];
 
-type ViewKey = "mail" | "buckets" | "rules" | "contacts" | "signatures" | "external" | "logs" | "other-settings";
+type ViewKey = "mail" | "buckets" | "rules" | "contacts" | "signatures" | "external" | "logs" | "index-engine" | "other-settings";
 type PaletteKey = "mint" | "ubuntu" | "fedora" | "plasma" | "graphite";
 type SettingsViewKey = Exclude<ViewKey, "mail" | "buckets">;
 type AuthViewKey = "checking" | "configuration" | "login" | "setup" | "reset-request" | "reset-confirm";
@@ -1118,6 +1121,8 @@ function AppContent() {
           />
         ) : view === "logs" ? (
           <LogsView api={api} onNotice={setNotice} />
+        ) : view === "index-engine" ? (
+          <IndexEngineView api={api} buckets={buckets} onNotice={setNotice} />
         ) : view === "other-settings" ? (
           <OtherSettingsView
             refreshIntervalSeconds={refreshIntervalSeconds}
@@ -1937,6 +1942,11 @@ function SettingsTitle({
       subtitle: "Activity and error history",
       icon: TerminalSquare
     },
+    "index-engine": {
+      title: "Index Engine",
+      subtitle: "R2 text and OCR index",
+      icon: FileText
+    },
     "other-settings": {
       title: "Other Settings",
       subtitle: "Refresh and interface",
@@ -2125,6 +2135,11 @@ function Sidebar({
           <TerminalSquare size={16} />
           <span>Logs</span>
           <b>{stats.audit_logs ?? 0}</b>
+        </button>
+        <button className={view === "index-engine" ? "settings-link active" : "settings-link"} type="button" onClick={() => onSettingsOpen("index-engine")}>
+          <FileText size={16} />
+          <span>Index Engine</span>
+          <b>OCR</b>
         </button>
         <button
           className={view === "other-settings" ? "settings-link active" : "settings-link"}
@@ -3610,6 +3625,228 @@ function LogsView({
   );
 }
 
+function IndexEngineView({
+  api,
+  buckets,
+  onNotice
+}: {
+  api: ApiClient | null;
+  buckets: BucketRow[];
+  onNotice: (message: string | null) => void;
+}) {
+  const [payload, setPayload] = useState<BucketIndexPayload | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [starting, setStarting] = useState(false);
+
+  const loadStatus = useCallback(
+    async (silent = false) => {
+      if (!api) return;
+      if (!silent) setLoading(true);
+      try {
+        const next = await api.bucketIndexStatus();
+        setPayload(next);
+      } catch (error) {
+        onNotice(`Index Engine failed: ${readError(error)}`);
+      } finally {
+        if (!silent) setLoading(false);
+      }
+    },
+    [api, onNotice]
+  );
+
+  useEffect(() => {
+    void loadStatus();
+  }, [loadStatus]);
+
+  const job = payload?.job ?? null;
+  const active = job?.status === "queued" || job?.status === "running";
+
+  useEffect(() => {
+    if (!api || !active) return;
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        await api.runBucketIndex().catch(() => undefined);
+        const next = await api.bucketIndexStatus();
+        if (!cancelled) setPayload(next);
+      } catch (error) {
+        if (!cancelled) onNotice(`Index Engine poll failed: ${readError(error)}`);
+      }
+    };
+
+    const timer = window.setInterval(() => void poll(), 3000);
+    void poll();
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [active, api, onNotice]);
+
+  async function startIndex() {
+    if (!api) return;
+    setStarting(true);
+    try {
+      const next = await api.startBucketIndex();
+      setPayload(next);
+      onNotice("Index Engine queued. It will continue in background and scheduled Worker runs.");
+    } catch (error) {
+      onNotice(`Index Engine could not start: ${readError(error)}`);
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  const currentBuckets = payload?.buckets ?? buckets;
+  const configuredBuckets = currentBuckets.filter((bucket) => bucket.configured);
+  let configuredPosition = 0;
+  const bucketRows = currentBuckets.map((bucket) => ({
+    bucket,
+    position: bucket.configured ? configuredPosition++ : -1
+  }));
+  const progressPercent = bucketIndexProgress(job, configuredBuckets.length);
+  const JobIcon = job?.status === "running" || job?.status === "queued" ? Loader2 : job?.status === "failed" ? AlertTriangle : CheckCircle2;
+  const aiConfigured = payload?.aiConfigured ?? false;
+
+  return (
+    <section className="settings-shell index-engine-shell">
+      <div className="index-engine-grid">
+        <section className="settings-card index-engine-card index-engine-hero">
+          <header>
+            <div>
+              <span>Index Engine</span>
+              <strong>{bucketIndexStatusLabel(job)}</strong>
+            </div>
+            <span className={`status-pill ${bucketIndexTone(job)}`}>
+              <JobIcon className={active ? "spin-icon" : undefined} size={13} />
+              {job?.status ?? "idle"}
+            </span>
+          </header>
+          <p>
+            Index Engine scans every configured R2 bucket, extracts searchable text, and stores the index in D1. Unchanged files are skipped by
+            object size and ETag, so repeat runs do not duplicate work.
+          </p>
+          <div className="bucket-upload-progress index-progress" aria-hidden="true">
+            <span style={{ width: `${progressPercent}%` }} />
+          </div>
+          <div className="index-engine-actions">
+            <button className="button primary" type="button" disabled={!api || starting || active || configuredBuckets.length === 0} onClick={() => void startIndex()}>
+              {starting || active ? <Loader2 className="spin-icon" size={15} /> : <Search size={15} />}
+              {active ? "Indexing" : "Index all buckets"}
+            </button>
+            <button className="button ghost" type="button" disabled={!api || loading} onClick={() => void loadStatus()}>
+              {loading ? <Loader2 className="spin-icon" size={15} /> : <RefreshCw size={15} />}
+              Refresh status
+            </button>
+          </div>
+        </section>
+
+        <section className="settings-card index-engine-card">
+          <header>
+            <div>
+              <span>OCR Runtime</span>
+              <strong>{aiConfigured ? "Workers AI connected" : "Workers AI not connected"}</strong>
+            </div>
+            {aiConfigured ? <CheckCircle2 size={18} /> : <AlertTriangle size={18} />}
+          </header>
+          <p>
+            PDF, image, Office, and spreadsheet files use Cloudflare Workers AI Markdown Conversion when the Worker has an AI binding. Text files
+            and searchable PDF text layers are indexed without AI.
+          </p>
+          <div className={aiConfigured ? "index-engine-note ok" : "index-engine-note warn"}>
+            {aiConfigured
+              ? "OCR/document extraction is available for supported files."
+              : "Deploy with an AI binding named AI to enable OCR-style extraction for images and scanned documents."}
+          </div>
+        </section>
+
+        <section className="settings-card index-engine-card">
+          <header>
+            <div>
+              <span>Run Counters</span>
+              <strong>{job ? `${job.scanned} scanned` : "No run yet"}</strong>
+            </div>
+            <FileText size={18} />
+          </header>
+          <div className="index-counter-grid">
+            <IndexCounter label="Indexed" value={job?.indexed ?? 0} />
+            <IndexCounter label="OCR" value={job?.ocr_indexed ?? 0} />
+            <IndexCounter label="Skipped" value={job?.skipped ?? 0} />
+            <IndexCounter label="Failed" value={job?.failed ?? 0} />
+          </div>
+          <p className="settings-note">
+            {job?.message ?? "Start a run to build the searchable R2 text index."}
+            {job?.last_error ? ` Last error: ${job.last_error}` : ""}
+          </p>
+        </section>
+
+        <section className="settings-card index-engine-card">
+          <header>
+            <div>
+              <span>Buckets</span>
+              <strong>{configuredBuckets.length} configured</strong>
+            </div>
+            <Server size={18} />
+          </header>
+          <div className="bucket-index-list">
+            {bucketRows.map((row) => (
+              <div className={row.bucket.configured ? "bucket-index-row" : "bucket-index-row muted"} key={row.bucket.id}>
+                <span>{row.bucket.name}</span>
+                <small>{row.bucket.configured ? (job && row.position < job.bucket_index ? "done" : "ready") : "missing binding"}</small>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="settings-card index-engine-card wide">
+          <header>
+            <div>
+              <span>Logs</span>
+              <strong>Audit trail connected</strong>
+            </div>
+            <TerminalSquare size={18} />
+          </header>
+          <p>
+            Successful objects are written as bucket.object_indexed; extraction failures are written as bucket.object_index_failed. Open Logs and
+            search bucket.index or bucket.object to inspect the run.
+          </p>
+        </section>
+      </div>
+    </section>
+  );
+}
+
+function IndexCounter({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="index-counter">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function bucketIndexProgress(job: BucketIndexJobRow | null, bucketCount: number): number {
+  if (!job) return 0;
+  if (job.status === "complete") return 100;
+  if (bucketCount <= 0) return 0;
+  return Math.max(0, Math.min(99, Math.round((job.bucket_index / bucketCount) * 100)));
+}
+
+function bucketIndexStatusLabel(job: BucketIndexJobRow | null): string {
+  if (!job) return "Not started";
+  if (job.status === "queued") return "Queued";
+  if (job.status === "running") return "Running";
+  if (job.status === "complete") return "Complete";
+  return "Failed";
+}
+
+function bucketIndexTone(job: BucketIndexJobRow | null): "ok" | "warn" | "error" {
+  if (!job) return "warn";
+  if (job.status === "complete") return "ok";
+  if (job.status === "failed") return "error";
+  return "warn";
+}
+
 function OtherSettingsView({
   refreshIntervalSeconds,
   onRefreshIntervalChange
@@ -3683,6 +3920,7 @@ function BucketsView({
   const [objects, setObjects] = useState<BucketObjectRow[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [creatingFolder, setCreatingFolder] = useState(false);
   const [uploadState, setUploadState] = useState<BucketUploadState | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchScope, setSearchScope] = useState<BucketSearchScope>("current");
@@ -3852,6 +4090,41 @@ function BucketsView({
     }
   }
 
+  async function createFolder() {
+    if (!api || !activeBucket) return;
+    const input = await dialog.prompt({
+      title: "New folder",
+      message: (
+        <>
+          Create a folder under <strong>{prefix || "/"}</strong>. Use slashes for subfolders, for example{" "}
+          <strong>reports/2026</strong>.
+        </>
+      ),
+      placeholder: "new-folder",
+      confirmLabel: "Create folder"
+    });
+    if (input === null) return;
+    const path = input.trim();
+    if (!path) {
+      onNotice("Folder name cannot be empty");
+      return;
+    }
+
+    setCreatingFolder(true);
+    try {
+      const data = await api.createBucketFolder(activeBucket.id, prefix, path);
+      setSearchResults(null);
+      setSearchMeta(null);
+      setSelectedKey(null);
+      setPrefix(data.folder.key);
+      onNotice(`Folder created: ${data.folder.key}`);
+    } catch (error) {
+      onNotice(readError(error));
+    } finally {
+      setCreatingFolder(false);
+    }
+  }
+
   async function deleteObject(object: BucketDisplayObjectRow) {
     const targetBucket = object.bucketId ? buckets.find((bucket) => bucket.id === object.bucketId) ?? null : activeBucket;
     if (!api || !targetBucket) return;
@@ -3931,7 +4204,7 @@ function BucketsView({
             className={searchIncludesText ? "button mini active" : "button mini"}
             type="button"
             onClick={() => setSearchIncludesText((current) => !current)}
-            title="Search embedded text in text files and searchable PDFs. This is not OCR."
+            title="Search filenames, paths, saved indexes, text files, searchable PDFs, and OCR output created by Index Engine."
           >
             <FileText size={14} />
             Text/PDF
@@ -3988,7 +4261,18 @@ function BucketsView({
               <span>Folders</span>
               <strong>{prefix || "/"}</strong>
             </div>
-            <FolderGit2 size={17} />
+            <div className="bucket-panel-actions">
+              <button
+                className="icon-button strong"
+                type="button"
+                onClick={() => void createFolder()}
+                disabled={creatingFolder || loading || uploading || !activeBucket?.writable}
+                title="Create folder"
+              >
+                {creatingFolder ? <Loader2 className="spin-icon" size={15} /> : <FolderPlus size={15} />}
+              </button>
+              <FolderGit2 size={17} />
+            </div>
           </header>
           <div className="bucket-list">
             {prefix ? (
@@ -4154,8 +4438,6 @@ function BucketObjectPreview({
     blob: Blob | null;
   }>({ loading: false, downloading: false, error: null, kind: "download", url: null, text: null, blob: null });
   const [textIndex, setTextIndex] = useState<{ text: string; source: string; updatedAt: string } | null>(null);
-  const [indexBusy, setIndexBusy] = useState(false);
-  const dialog = useAppDialog();
 
   useEffect(() => {
     let active = true;
@@ -4241,65 +4523,6 @@ function BucketObjectPreview({
     }
   }
 
-  async function editTextIndex() {
-    if (!api || !bucket || !object) return;
-    const input = await dialog.prompt({
-      title: "Index text",
-      message: (
-        <>
-          Paste OCR text or extracted text for <strong>{object.name}</strong>. Bucket search will use this saved index.
-        </>
-      ),
-      defaultValue: textIndex?.text ?? state.text ?? "",
-      placeholder: "Paste OCR text here",
-      confirmLabel: "Save index",
-      multiline: true
-    });
-    if (input === null) return;
-    const text = input.trim();
-    if (!text) {
-      onNotice("Index text cannot be empty");
-      return;
-    }
-
-    setIndexBusy(true);
-    try {
-      const data = await api.saveBucketObjectTextIndex(bucket.id, object.key, text, "manual");
-      setTextIndex(data.index ? { text: data.index.text, source: data.index.source, updatedAt: data.index.updated_at } : null);
-      onNotice("Text index saved. Search can find this object now.");
-    } catch (error) {
-      onNotice(readError(error));
-    } finally {
-      setIndexBusy(false);
-    }
-  }
-
-  async function removeTextIndex() {
-    if (!api || !bucket || !object || !textIndex) return;
-    const confirmed = await dialog.confirm({
-      title: "Delete text index",
-      message: (
-        <>
-          Remove the saved search text for <strong>{object.name}</strong>?
-        </>
-      ),
-      confirmLabel: "Delete",
-      tone: "danger"
-    });
-    if (!confirmed) return;
-
-    setIndexBusy(true);
-    try {
-      await api.deleteBucketObjectTextIndex(bucket.id, object.key);
-      setTextIndex(null);
-      onNotice("Text index deleted");
-    } catch (error) {
-      onNotice(readError(error));
-    } finally {
-      setIndexBusy(false);
-    }
-  }
-
   return (
     <section className="bucket-panel preview-panel">
       <header>
@@ -4313,16 +4536,6 @@ function BucketObjectPreview({
           ) : null}
         </div>
         <div className="preview-actions">
-          <button className="button ghost" type="button" disabled={!object || !api || !bucket || indexBusy} onClick={() => void editTextIndex()}>
-            {indexBusy ? <Loader2 size={15} /> : <FileText size={15} />}
-            {textIndex ? "Edit index" : "Index text"}
-          </button>
-          {textIndex ? (
-            <button className="button ghost" type="button" disabled={indexBusy} onClick={() => void removeTextIndex()} title="Delete text index">
-              <Trash2 size={15} />
-              Clear index
-            </button>
-          ) : null}
           <button
             className="button ghost"
             type="button"

@@ -12,7 +12,8 @@ const CURRENT_MIGRATIONS = [
   "0009_auth_attempts.sql",
   "0010_bucket_text_index.sql",
   "0011_external_sync_jobs.sql",
-  "0012_admin_sessions.sql"
+  "0012_admin_sessions.sql",
+  "0013_bucket_index_jobs.sql"
 ];
 
 let schemaReady: Promise<void> | null = null;
@@ -261,6 +262,23 @@ const schemaStatements = [
     completed_at TEXT,
     FOREIGN KEY (account_id) REFERENCES external_accounts(id) ON DELETE CASCADE
   )`,
+  `CREATE TABLE IF NOT EXISTS bucket_index_jobs (
+    id TEXT PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'complete', 'failed')),
+    bucket_index INTEGER NOT NULL DEFAULT 0,
+    cursor TEXT,
+    scanned INTEGER NOT NULL DEFAULT 0,
+    indexed INTEGER NOT NULL DEFAULT 0,
+    skipped INTEGER NOT NULL DEFAULT 0,
+    failed INTEGER NOT NULL DEFAULT 0,
+    ocr_indexed INTEGER NOT NULL DEFAULT 0,
+    message TEXT,
+    last_error TEXT,
+    lease_until TEXT,
+    started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at TEXT
+  )`,
   `CREATE TABLE IF NOT EXISTS d1_migrations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT UNIQUE,
@@ -288,5 +306,6 @@ const indexStatements = [
   "CREATE INDEX IF NOT EXISTS idx_admin_sessions_expires ON admin_sessions(expires_at)",
   "CREATE INDEX IF NOT EXISTS idx_bucket_text_index_bucket ON bucket_text_index(bucket_id, object_key)",
   "CREATE INDEX IF NOT EXISTS idx_bucket_text_index_normalized ON bucket_text_index(normalized_text)",
-  "CREATE INDEX IF NOT EXISTS idx_external_sync_jobs_status ON external_sync_jobs(status, lease_until, updated_at)"
+  "CREATE INDEX IF NOT EXISTS idx_external_sync_jobs_status ON external_sync_jobs(status, lease_until, updated_at)",
+  "CREATE INDEX IF NOT EXISTS idx_bucket_index_jobs_status ON bucket_index_jobs(status, lease_until, updated_at)"
 ];

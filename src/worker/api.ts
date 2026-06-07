@@ -42,6 +42,7 @@ import {
   listMailboxes,
   listThreads,
   markThreadRead,
+  nowIso,
   normalizeDomain,
   recordAudit,
   setDefaultDomain,
@@ -59,6 +60,7 @@ import {
   runExternalSyncJobs,
   syncExternalAccount
 } from "./external-sync";
+import { ensureDatabaseSchema } from "./schema";
 import {
   ApiError,
   RuntimeEnv,
@@ -548,6 +550,24 @@ export async function handleApi(
       return json({ ok: true, buckets: listAvailableBuckets(env) });
     }
 
+    if (url.pathname === "/api/bucket-index") {
+      if (request.method === "GET") {
+        return json({ ok: true, ...(await bucketIndexStatus(env)) });
+      }
+      if (request.method === "POST") {
+        await queueBucketIndexJob(env);
+        ctx.waitUntil(runBucketIndexJobs(env, { maxDurationMs: BUCKET_INDEX_HTTP_BACKGROUND_MS }));
+        return json({ ok: true, ...(await bucketIndexStatus(env)) }, { status: 202 });
+      }
+      return methodNotAllowed();
+    }
+
+    if (url.pathname === "/api/bucket-index/run") {
+      if (request.method !== "POST") return methodNotAllowed();
+      ctx.waitUntil(runBucketIndexJobs(env, { maxDurationMs: BUCKET_INDEX_HTTP_BACKGROUND_MS }));
+      return json({ ok: true, ...(await bucketIndexStatus(env)) });
+    }
+
     if (url.pathname === "/api/buckets/search") {
       if (request.method !== "GET") return methodNotAllowed();
       const result = await searchBucketObjects(env, url);
@@ -592,10 +612,46 @@ export async function handleApi(
           key: folderPrefix,
           name: displayR2FolderName(folderPrefix, prefix)
         })),
-        objects: result.objects.map(serializeR2Object).filter((object) => object.key !== prefix),
+        objects: result.objects.map(serializeR2Object).filter((object) => object.key !== prefix && !isR2FolderMarkerKey(object.key)),
         cursor: result.truncated ? result.cursor : null,
         truncated: result.truncated
       });
+    }
+
+    const bucketFoldersMatch = url.pathname.match(/^\/api\/buckets\/([^/]+)\/folders$/);
+    if (bucketFoldersMatch) {
+      if (request.method !== "POST") return methodNotAllowed();
+      const bucket = getBucketBinding(env, bucketFoldersMatch[1]);
+      const body = await readJson(request);
+      const prefix = normalizeR2Prefix(optionalString(body, "prefix", { max: 1024 }) ?? "");
+      const folderPath = readR2FolderPath(body);
+      const folderPrefix = joinR2FolderPrefix(prefix, folderPath);
+      const markerKey = `${folderPrefix}${R2_FOLDER_MARKER_NAME}`;
+      const uploaded = await bucket.bucket.put(markerKey, "", {
+        httpMetadata: {
+          contentDisposition: `attachment; filename="${R2_FOLDER_MARKER_NAME}"`,
+          contentType: R2_FOLDER_MARKER_CONTENT_TYPE
+        },
+        customMetadata: {
+          omnidock: "folder"
+        }
+      });
+      ctx.waitUntil(
+        recordAudit(env, "bucket.folder_created", folderPrefix, {
+          bucket: bucket.info.id,
+          marker: uploaded.key
+        })
+      );
+      return json(
+        {
+          ok: true,
+          folder: {
+            key: folderPrefix,
+            name: displayR2FolderName(folderPrefix, prefix)
+          }
+        },
+        { status: 201 }
+      );
     }
 
     const bucketObjectMatch = url.pathname.match(/^\/api\/buckets\/([^/]+)\/object$/);
@@ -803,6 +859,17 @@ const MAX_BUCKET_TEXT_SEARCH_BYTES = 2 * 1024 * 1024;
 const MAX_BUCKET_UNKNOWN_TEXT_SEARCH_BYTES = 256 * 1024;
 const MAX_BUCKET_SEARCH_TIME_MS = 15_000;
 const MAX_BUCKET_TEXT_FILE_TIMEOUT_MS = 3_500;
+const R2_FOLDER_MARKER_NAME = ".omnidock-folder";
+const R2_FOLDER_MARKER_CONTENT_TYPE = "application/x.omnidock-folder";
+export const BUCKET_INDEX_MAX_RUN_MS = 14 * 60 * 1000;
+const BUCKET_INDEX_HTTP_BACKGROUND_MS = 25_000;
+const BUCKET_INDEX_JOB_ID = "global";
+const BUCKET_INDEX_LEASE_MS = 2 * 60 * 1000;
+const BUCKET_INDEX_PAGE_LIMIT = 60;
+const BUCKET_INDEX_OBJECT_MAX_BYTES = 12 * 1024 * 1024;
+const BUCKET_INDEX_TEXT_MAX_BYTES = 6 * 1024 * 1024;
+const BUCKET_INDEX_AI_MAX_BYTES = 10 * 1024 * 1024;
+const BUCKET_INDEX_TEXT_DEADLINE_MS = 12_000;
 
 class BucketSearchTimeoutError extends Error {
   constructor(label: string) {
@@ -810,6 +877,38 @@ class BucketSearchTimeoutError extends Error {
     this.name = "BucketSearchTimeoutError";
   }
 }
+
+type BucketIndexJobStatus = "queued" | "running" | "complete" | "failed";
+
+export type BucketIndexJobRow = {
+  id: string;
+  status: BucketIndexJobStatus;
+  bucket_index: number;
+  cursor: string | null;
+  scanned: number;
+  indexed: number;
+  skipped: number;
+  failed: number;
+  ocr_indexed: number;
+  message: string | null;
+  last_error: string | null;
+  lease_until: string | null;
+  started_at: string;
+  updated_at: string;
+  completed_at: string | null;
+};
+
+type BucketIndexDelta = {
+  scanned: number;
+  indexed: number;
+  skipped: number;
+  failed: number;
+  ocrIndexed: number;
+};
+
+type BucketIndexExtraction =
+  | { status: "indexed"; text: string; source: string; ocr: boolean }
+  | { status: "skipped"; reason: string };
 
 function listAvailableBuckets(env: RuntimeEnv): BucketInfo[] {
   const configured = Boolean(env.MAIL_BUCKET);
@@ -905,6 +1004,256 @@ function getBucketBinding(env: RuntimeEnv, bucketId: string): BucketBinding {
     throw new ApiError(503, "bucket_binding_missing", `R2 binding ${info.binding} is not configured for this Worker.`);
   }
   return { info, bucket };
+}
+
+async function bucketIndexStatus(env: RuntimeEnv): Promise<{ job: BucketIndexJobRow | null; buckets: BucketInfo[]; aiConfigured: boolean }> {
+  await ensureDatabaseSchema(env);
+  await requeueExpiredBucketIndexJob(env);
+  return {
+    job: await getBucketIndexJob(env),
+    buckets: listAvailableBuckets(env),
+    aiConfigured: isAiBinding(env.AI)
+  };
+}
+
+async function getBucketIndexJob(env: RuntimeEnv): Promise<BucketIndexJobRow | null> {
+  return (
+    (await env.DB.prepare("SELECT * FROM bucket_index_jobs WHERE id = ? LIMIT 1")
+      .bind(BUCKET_INDEX_JOB_ID)
+      .first<BucketIndexJobRow>()) ?? null
+  );
+}
+
+async function queueBucketIndexJob(env: RuntimeEnv): Promise<BucketIndexJobRow> {
+  await ensureDatabaseSchema(env);
+  await env.DB.prepare(
+    `INSERT INTO bucket_index_jobs (
+      id, status, bucket_index, cursor, scanned, indexed, skipped, failed, ocr_indexed,
+      message, last_error, lease_until, started_at, updated_at, completed_at
+    ) VALUES (?, 'queued', 0, NULL, 0, 0, 0, 0, 0, ?, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)
+    ON CONFLICT(id) DO UPDATE SET
+      status = 'queued',
+      bucket_index = 0,
+      cursor = NULL,
+      scanned = 0,
+      indexed = 0,
+      skipped = 0,
+      failed = 0,
+      ocr_indexed = 0,
+      message = excluded.message,
+      last_error = NULL,
+      lease_until = NULL,
+      started_at = CURRENT_TIMESTAMP,
+      updated_at = CURRENT_TIMESTAMP,
+      completed_at = NULL`
+  )
+    .bind(BUCKET_INDEX_JOB_ID, "Queued full bucket index")
+    .run();
+  await recordAudit(env, "bucket.index_queued", BUCKET_INDEX_JOB_ID, {
+    buckets: listAvailableBuckets(env).filter((bucket) => bucket.configured).length,
+    aiConfigured: isAiBinding(env.AI)
+  });
+  const job = await getBucketIndexJob(env);
+  if (!job) {
+    throw new ApiError(500, "bucket_index_queue_failed", "Bucket index job could not be queued");
+  }
+  return job;
+}
+
+async function requeueExpiredBucketIndexJob(env: RuntimeEnv): Promise<void> {
+  await env.DB.prepare(
+    `UPDATE bucket_index_jobs
+     SET status = 'queued',
+         lease_until = NULL,
+         message = 'Previous index window expired. Continuing from saved cursor.',
+         updated_at = CURRENT_TIMESTAMP
+     WHERE status = 'running' AND lease_until IS NOT NULL AND lease_until < ?`
+  )
+    .bind(nowIso())
+    .run();
+}
+
+export async function runBucketIndexJobs(
+  env: RuntimeEnv,
+  options: { maxDurationMs?: number } = {}
+): Promise<{ job: BucketIndexJobRow | null }> {
+  if (!env.DB) return { job: null };
+  await ensureDatabaseSchema(env);
+  await requeueExpiredBucketIndexJob(env);
+
+  const buckets = listAvailableBuckets(env)
+    .filter((bucket) => bucket.configured)
+    .map((info) => ({ info, bucket: r2BucketFromEnv(env, info.binding) }))
+    .filter((bucket): bucket is BucketBinding => Boolean(bucket.bucket));
+  const maxDurationMs = Math.max(1_000, options.maxDurationMs ?? BUCKET_INDEX_MAX_RUN_MS);
+  const deadlineMs = Date.now() + maxDurationMs;
+
+  let job = await getBucketIndexJob(env);
+  if (!job || job.status === "complete" || job.status === "failed") {
+    return { job };
+  }
+  if (buckets.length === 0) {
+    await completeBucketIndexJob(env, "No configured R2 buckets found");
+    return { job: await getBucketIndexJob(env) };
+  }
+
+  await startBucketIndexLease(env, "Indexing R2 buckets");
+  job = (await getBucketIndexJob(env)) ?? job;
+
+  while (Date.now() < deadlineMs) {
+    const bucketPosition = Math.max(0, Math.min(job.bucket_index, buckets.length));
+    if (bucketPosition >= buckets.length) {
+      await completeBucketIndexJob(env, "Bucket index complete");
+      await recordAudit(env, "bucket.index_complete", BUCKET_INDEX_JOB_ID, {
+        scanned: job.scanned,
+        indexed: job.indexed,
+        skipped: job.skipped,
+        failed: job.failed,
+        ocrIndexed: job.ocr_indexed
+      });
+      return { job: await getBucketIndexJob(env) };
+    }
+
+    const currentBucket = buckets[bucketPosition];
+    const page = await currentBucket.bucket.list({
+      cursor: job.cursor ?? undefined,
+      include: ["httpMetadata"],
+      limit: BUCKET_INDEX_PAGE_LIMIT
+    });
+    const delta: BucketIndexDelta = { scanned: 0, indexed: 0, skipped: 0, failed: 0, ocrIndexed: 0 };
+
+    for (const object of page.objects) {
+      if (Date.now() >= deadlineMs) break;
+      if (isR2FolderMarkerKey(object.key)) {
+        delta.skipped += 1;
+        continue;
+      }
+
+      delta.scanned += 1;
+      try {
+        const existing = await getBucketObjectTextIndex(env, currentBucket.info, object.key);
+        if (existing && existing.object_etag === object.httpEtag && existing.object_size === object.size) {
+          delta.skipped += 1;
+          continue;
+        }
+
+        const extraction = await extractBucketIndexText(env, currentBucket, object, Date.now() + BUCKET_INDEX_TEXT_DEADLINE_MS);
+        if (extraction.status === "skipped") {
+          delta.skipped += 1;
+          continue;
+        }
+
+        await upsertBucketObjectTextIndex(env, currentBucket.info, object, extraction.text, extraction.source);
+        delta.indexed += 1;
+        if (extraction.ocr) delta.ocrIndexed += 1;
+        await recordAudit(env, "bucket.object_indexed", object.key, {
+          bucket: currentBucket.info.id,
+          source: extraction.source,
+          size: object.size
+        });
+      } catch (error) {
+        delta.failed += 1;
+        const message = error instanceof Error ? error.message : "Object index failed";
+        await recordAudit(env, "bucket.object_index_failed", object.key, {
+          bucket: currentBucket.info.id,
+          error: message.slice(0, 500)
+        });
+      }
+    }
+
+    const finishedBucket = !page.truncated;
+    const reachedDeadline = Date.now() >= deadlineMs;
+    const nextBucketIndex = finishedBucket && !reachedDeadline ? bucketPosition + 1 : bucketPosition;
+    const nextCursor = finishedBucket ? null : page.cursor ?? job.cursor;
+    await updateBucketIndexJob(env, {
+      status: "queued",
+      bucketIndex: nextBucketIndex,
+      cursor: nextCursor,
+      delta,
+      message: finishedBucket
+        ? `Indexed ${currentBucket.info.name}; moving to next bucket`
+        : `Indexed ${currentBucket.info.name}; cursor saved`,
+      lastError: null
+    });
+
+    job = (await getBucketIndexJob(env)) ?? job;
+    if (reachedDeadline) break;
+  }
+
+  await startBucketIndexLease(env, "Bucket index paused; next run will continue");
+  return { job: await getBucketIndexJob(env) };
+}
+
+async function startBucketIndexLease(env: RuntimeEnv, message: string): Promise<void> {
+  await env.DB.prepare(
+    `UPDATE bucket_index_jobs
+     SET status = 'running',
+         lease_until = ?,
+         message = ?,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND status IN ('queued', 'running')`
+  )
+    .bind(new Date(Date.now() + BUCKET_INDEX_LEASE_MS).toISOString(), message, BUCKET_INDEX_JOB_ID)
+    .run();
+}
+
+async function updateBucketIndexJob(
+  env: RuntimeEnv,
+  input: {
+    status: BucketIndexJobStatus;
+    bucketIndex: number;
+    cursor: string | null;
+    delta: BucketIndexDelta;
+    message: string;
+    lastError: string | null;
+  }
+): Promise<void> {
+  await env.DB.prepare(
+    `UPDATE bucket_index_jobs
+     SET status = ?,
+         bucket_index = ?,
+         cursor = ?,
+         scanned = scanned + ?,
+         indexed = indexed + ?,
+         skipped = skipped + ?,
+         failed = failed + ?,
+         ocr_indexed = ocr_indexed + ?,
+         message = ?,
+         last_error = ?,
+         lease_until = ?,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`
+  )
+    .bind(
+      input.status,
+      input.bucketIndex,
+      input.cursor,
+      input.delta.scanned,
+      input.delta.indexed,
+      input.delta.skipped,
+      input.delta.failed,
+      input.delta.ocrIndexed,
+      input.message,
+      input.lastError,
+      new Date(Date.now() + BUCKET_INDEX_LEASE_MS).toISOString(),
+      BUCKET_INDEX_JOB_ID
+    )
+    .run();
+}
+
+async function completeBucketIndexJob(env: RuntimeEnv, message: string): Promise<void> {
+  await env.DB.prepare(
+    `UPDATE bucket_index_jobs
+     SET status = 'complete',
+         cursor = NULL,
+         message = ?,
+         lease_until = NULL,
+         completed_at = CURRENT_TIMESTAMP,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = ?`
+  )
+    .bind(message, BUCKET_INDEX_JOB_ID)
+    .run();
 }
 
 async function searchBucketObjects(env: RuntimeEnv, url: URL) {
@@ -1011,6 +1360,7 @@ async function searchBucketObjects(env: RuntimeEnv, url: URL) {
           truncated = true;
           break;
         }
+        if (isR2FolderMarkerKey(object.key)) continue;
         scanned += 1;
         const keySearch = normalizeSearchText(object.key);
         const nameSearch = normalizeSearchText(filenameFromR2Key(object.key));
@@ -1251,6 +1601,169 @@ async function searchBucketTextIndexes(
     match: "content" as const,
     snippet: snippetForNormalizedText(row.text, normalizedQuery)
   }));
+}
+
+async function extractBucketIndexText(
+  env: RuntimeEnv,
+  bucket: BucketBinding,
+  object: R2Object,
+  deadlineMs: number
+): Promise<BucketIndexExtraction> {
+  if (object.size > BUCKET_INDEX_OBJECT_MAX_BYTES) {
+    return { status: "skipped", reason: "Object is too large for Worker indexing" };
+  }
+  if (isR2FolderMarkerKey(object.key)) {
+    return { status: "skipped", reason: "Folder marker" };
+  }
+
+  const contentType = object.httpMetadata?.contentType?.toLowerCase() ?? "";
+  const lowerKey = object.key.toLowerCase();
+
+  if (isAiMarkdownCandidate(object)) {
+    if (isAiBinding(env.AI)) {
+      try {
+        const text = await extractMarkdownWithWorkersAi(env.AI, bucket.bucket, object, deadlineMs);
+        if (text.trim()) {
+          return { status: "indexed", text, source: "workers-ai-tomarkdown", ocr: true };
+        }
+      } catch (error) {
+        if (!isPdfSearchCandidate(object)) throw error;
+      }
+    } else if (!isPdfSearchCandidate(object) && !isTextLikeObject(object)) {
+      return { status: "skipped", reason: "Workers AI binding AI is not configured for OCR" };
+    }
+  }
+
+  if (isPdfSearchCandidate(object)) {
+    if (object.size > BUCKET_INDEX_TEXT_MAX_BYTES) {
+      return { status: "skipped", reason: "PDF is too large for fallback text extraction" };
+    }
+    const body = await bucket.bucket.get(object.key);
+    if (!body) return { status: "skipped", reason: "Object disappeared before indexing" };
+    const text = await extractPdfText(await body.arrayBuffer(), deadlineMs);
+    return text.trim()
+      ? { status: "indexed", text, source: "pdf-text-layer", ocr: false }
+      : { status: "skipped", reason: "No extractable PDF text and OCR is unavailable" };
+  }
+
+  if (isTextLikeObject(object)) {
+    if (object.size > BUCKET_INDEX_TEXT_MAX_BYTES) {
+      return { status: "skipped", reason: "Text file is too large for Worker indexing" };
+    }
+    const body = await bucket.bucket.get(object.key);
+    if (!body) return { status: "skipped", reason: "Object disappeared before indexing" };
+    const text = await body.text();
+    return text.trim()
+      ? { status: "indexed", text, source: contentType.includes("html") || lowerKey.endsWith(".html") ? "html-text" : "text", ocr: false }
+      : { status: "skipped", reason: "Empty text" };
+  }
+
+  return { status: "skipped", reason: "Unsupported index format" };
+}
+
+async function extractMarkdownWithWorkersAi(
+  ai: Ai,
+  bucket: R2Bucket,
+  object: R2Object,
+  deadlineMs: number
+): Promise<string> {
+  assertBucketSearchBudget(deadlineMs, object.key);
+  const body = await bucket.get(object.key);
+  if (!body) return "";
+  const blob = new Blob([await body.arrayBuffer()], {
+    type: object.httpMetadata?.contentType || contentTypeForIndexObject(object)
+  });
+  assertBucketSearchBudget(deadlineMs, object.key);
+  const result = await withBucketSearchTimeout(
+    ai.toMarkdown(
+      {
+        name: filenameFromR2Key(object.key),
+        blob
+      },
+      {
+        conversionOptions: {
+          image: { descriptionLanguage: "en" },
+          pdf: {
+            metadata: false,
+            images: {
+              convert: true,
+              maxConvertedImages: 16,
+              descriptionLanguage: "en"
+            }
+          }
+        }
+      }
+    ),
+    bucketSearchRemainingMs(deadlineMs),
+    object.key
+  );
+  if (result.format === "error") {
+    throw new Error(result.error);
+  }
+  return result.data;
+}
+
+function isAiBinding(value: unknown): value is Ai {
+  return Boolean(value && typeof value === "object" && typeof (value as { toMarkdown?: unknown }).toMarkdown === "function");
+}
+
+function isTextLikeObject(object: R2Object): boolean {
+  const contentType = object.httpMetadata?.contentType?.toLowerCase() ?? "";
+  const filename = object.key.toLowerCase();
+  return (
+    contentType.startsWith("text/") ||
+    contentType.includes("json") ||
+    [".txt", ".md", ".csv", ".json", ".log", ".xml", ".html", ".css", ".js", ".ts", ".tsx", ".yml", ".yaml"].some((ext) =>
+      filename.endsWith(ext)
+    )
+  );
+}
+
+function isAiMarkdownCandidate(object: R2Object): boolean {
+  const contentType = object.httpMetadata?.contentType?.toLowerCase() ?? "";
+  const filename = object.key.toLowerCase();
+  const markdownExtensions = [
+    ".pdf",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".gif",
+    ".bmp",
+    ".svg",
+    ".docx",
+    ".pptx",
+    ".xlsx",
+    ".xls",
+    ".csv",
+    ".html"
+  ];
+  return (
+    object.size <= BUCKET_INDEX_AI_MAX_BYTES &&
+    (contentType.startsWith("image/") ||
+      contentType === "application/pdf" ||
+      contentType.includes("officedocument") ||
+      contentType.includes("spreadsheet") ||
+      contentType.includes("presentation") ||
+      contentType.includes("msword") ||
+      markdownExtensions.some((extension) => filename.endsWith(extension)))
+  );
+}
+
+function contentTypeForIndexObject(object: R2Object): string {
+  const filename = object.key.toLowerCase();
+  if (filename.endsWith(".pdf")) return "application/pdf";
+  if (filename.endsWith(".png")) return "image/png";
+  if (filename.endsWith(".jpg") || filename.endsWith(".jpeg")) return "image/jpeg";
+  if (filename.endsWith(".webp")) return "image/webp";
+  if (filename.endsWith(".gif")) return "image/gif";
+  if (filename.endsWith(".svg")) return "image/svg+xml";
+  if (filename.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  if (filename.endsWith(".pptx")) return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+  if (filename.endsWith(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  if (filename.endsWith(".csv")) return "text/csv";
+  if (filename.endsWith(".html")) return "text/html";
+  return object.httpMetadata?.contentType || "application/octet-stream";
 }
 
 function snippetForNormalizedText(text: string, normalizedQuery: string): string | null {
@@ -1699,6 +2212,43 @@ function readR2Prefix(url: URL): string {
   return prefix;
 }
 
+function normalizeR2Prefix(prefix: string): string {
+  const trimmed = prefix.trim();
+  if (!trimmed) return "";
+  if (trimmed.length > 1024 || /[\u0000-\u001f\u007f]/.test(trimmed) || trimmed.startsWith("/")) {
+    throw new ApiError(400, "invalid_prefix", "R2 prefix is invalid");
+  }
+  return trimmed.endsWith("/") ? trimmed : `${trimmed}/`;
+}
+
+function readR2FolderPath(body: Record<string, unknown>): string {
+  const raw = requiredString(body, "path", { min: 1, max: 512 });
+  if (/[\u0000-\u001f\u007f\\]/.test(raw) || raw.startsWith("/")) {
+    throw new ApiError(400, "invalid_folder", "Folder path is invalid");
+  }
+
+  const segments = raw
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  if (segments.length === 0 || segments.some((segment) => segment === "." || segment === ".." || segment === R2_FOLDER_MARKER_NAME)) {
+    throw new ApiError(400, "invalid_folder", "Folder path is invalid");
+  }
+  if (segments.some((segment) => segment.length > 128)) {
+    throw new ApiError(400, "invalid_folder", "Folder names can be up to 128 characters");
+  }
+
+  return `${segments.join("/")}/`;
+}
+
+function joinR2FolderPrefix(prefix: string, folderPath: string): string {
+  const joined = `${prefix}${folderPath}`.replace(/^\/+/, "");
+  if (joined.length > 1024) {
+    throw new ApiError(400, "invalid_folder", "Folder path is too long");
+  }
+  return joined;
+}
+
 function readR2Key(url: URL): string {
   const key = url.searchParams.get("key") ?? "";
   if (!key || key.length > 1024 || key.startsWith("/") || key.endsWith("/") || /[\u0000-\u001f\u007f]/.test(key)) {
@@ -1721,6 +2271,10 @@ function serializeR2Object(object: R2Object) {
 function displayR2FolderName(folderPrefix: string, parentPrefix: string): string {
   const relative = folderPrefix.slice(parentPrefix.length).replace(/\/$/, "");
   return relative.split("/").filter(Boolean).pop() || folderPrefix.replace(/\/$/, "") || "/";
+}
+
+function isR2FolderMarkerKey(key: string): boolean {
+  return key.split("/").filter(Boolean).pop() === R2_FOLDER_MARKER_NAME;
 }
 
 function filenameFromR2Key(key: string): string {

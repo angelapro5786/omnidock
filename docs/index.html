@@ -6,11 +6,11 @@
     <title>OmniDock - Open-source Cloudflare Email Operations</title>
     <meta
       name="description"
-      content="OmniDock is an open-source Cloudflare Workers email operations dashboard for Email Routing, Email Sending, D1, R2 bucket management, Gmail and external IMAP/SMTP sync, contacts, signatures, logs, previews, uploads, and OCR-ready text indexes."
+      content="OmniDock is an open-source Cloudflare Workers email operations dashboard for Email Routing, Email Sending, D1, R2 bucket management, Workers AI document indexing, Gmail and external IMAP/SMTP sync, contacts, signatures, logs, previews, uploads, and indexed OCR search."
     />
     <meta
       name="keywords"
-      content="OmniDock, Cloudflare email dashboard, Cloudflare Workers email, Email Routing, Email Sending, D1, R2 bucket manager, Gmail sync, IMAP sync, SMTP sending, self hosted email, support inbox, PDF preview, OCR text indexing"
+      content="OmniDock, Cloudflare email dashboard, Cloudflare Workers email, Email Routing, Email Sending, D1, R2 bucket manager, Workers AI, Gmail sync, IMAP sync, SMTP sending, self hosted email, support inbox, PDF preview, OCR text indexing, document search"
     />
     <link rel="canonical" href="https://ufukayyildiz.github.io/omnidock/" />
     <meta name="theme-color" content="#0f766e" />
@@ -18,7 +18,7 @@
     <meta property="og:title" content="OmniDock - Open-source Cloudflare Email Operations" />
     <meta
       property="og:description"
-      content="Run support inboxes, Gmail and external email sync, R2 buckets, previews, uploads, contacts, signatures, logs, OCR-ready search, and domain routing from one Cloudflare-native dashboard."
+      content="Run support inboxes, Gmail and external email sync, R2 buckets, previews, uploads, contacts, signatures, logs, indexed OCR search, and domain routing from one Cloudflare-native dashboard."
     />
     <meta property="og:url" content="https://ufukayyildiz.github.io/omnidock/" />
     <meta property="og:image" content="https://ufukayyildiz.github.io/omnidock/brand/omnidock-social-preview.svg" />
@@ -27,7 +27,7 @@
     <meta name="twitter:title" content="OmniDock - Cloudflare email operations dashboard" />
     <meta
       name="twitter:description"
-      content="A self-hosted Cloudflare Workers dashboard for email, Gmail sync, external IMAP/SMTP, contacts, logs, R2 files, previews, uploads, and OCR-ready search."
+      content="A self-hosted Cloudflare Workers dashboard for email, Gmail sync, external IMAP/SMTP, contacts, logs, R2 files, previews, uploads, and Workers AI document search."
     />
     <meta name="twitter:image" content="https://ufukayyildiz.github.io/omnidock/brand/omnidock-social-preview.svg" />
     <link rel="icon" href="./brand/omnidock-social-preview.svg" type="image/svg+xml" />
@@ -645,18 +645,18 @@
           </ul>
         </article>
         <article class="wide-panel">
-          <h2>OCR-ready document search without surprise AI cost</h2>
+          <h2>Index Engine for OCR and document search</h2>
           <p>
-            OmniDock does not automatically run paid AI/OCR on every search. It searches extractable
-            PDF text and stored text indexes. For scanned PDFs or images, open the object, choose
-            <span class="code">Index text</span>, paste OCR text from your preferred OCR tool, and
-            OmniDock stores that index in D1 for future searches.
+            OmniDock does not run OCR inside every search query. Operators start Settings &gt; Index
+            Engine when they want a full R2 text index. The Worker scans configured buckets, skips
+            unchanged files by ETag and size, stores extracted text in D1, and logs successes or
+            failures for review.
           </p>
           <ul class="check-list">
             <li>Search text files and PDFs with embedded selectable text.</li>
-            <li>Save OCR text manually for scanned PDFs, screenshots, labels, and image documents.</li>
+            <li>Use Workers AI Markdown Conversion for supported scanned PDFs, screenshots, labels, and image documents.</li>
             <li>Keep repeated searches fast by storing the text index in D1.</li>
-            <li>Log slow or failed searches so operators can narrow scope or turn off text search.</li>
+            <li>Audit each indexed or failed object in Logs so operators can see exactly what happened.</li>
           </ul>
         </article>
       </section>

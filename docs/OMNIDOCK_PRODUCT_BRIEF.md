@@ -362,17 +362,23 @@ R2 ozellikleri:
 - Search all buckets
 - Turkish/non-English character aware search
 - Saved text index
+- Settings altinda Index Engine
+- Workers AI destekli dokuman-to-markdown/OCR extraction
+- Duplicate index guard: object ETag ve size ayniysa yeniden indexleme yapmaz
 
 OCR ve text index yaklasimi:
 
-OmniDock otomatik AI OCR calistirmaz. Bunun nedeni maliyeti kontrol etmek ve kullaniciyi surpriz billing riskinden korumaktir. Scanned PDF veya image icin kullanici `Index text` ile OCR text'i manuel veya kendi araci ile paste edebilir. OmniDock bu text'i D1'e kaydeder. Sonraki search'lerde bu saved text index kullanilir.
+OmniDock OCR ve dokuman text extraction isini search aninda yapmaz. Bunun yerine Settings > Index Engine altinda merkezi bir index motoru vardir. Kullanici Index Engine'i calistirinca OmniDock tum configured R2 bucket'lari gezer, desteklenen dosyalardan text cikarir, sonucu D1 icindeki `bucket_text_index` tablosuna yazar ve her basarili/hatalı dosya icin Logs'a audit row ekler. Ayni object ETag ve size ile zaten indexlenmisse dosya skip edilir; duplicate index ve gereksiz yeniden indexleme yapilmaz.
+
+Worker'da `AI` binding varsa PDF, image, Office document ve spreadsheet dosyalari Cloudflare Workers AI Markdown Conversion ile Markdown/text'e cevrilir. Text file ve searchable PDF text layer extraction AI olmadan da calisir. Bu sayede bucket search sorgulari R2 dosyalarini tekrar OCR yapmaz; hazir D1 index'ini kullanir.
 
 Docs'ta acik soylenmeli:
 
 - Search path ve file name uzerinde hizlidir.
-- Text search text dosyalari ve searchable PDF'lerde calisir.
-- Scanned PDF/image icin OCR text index gerekir.
-- Bu "OCR-ready" yaklasimdir, otomatik AI OCR degildir.
+- Text search D1'e kaydedilmis index, text dosyalari ve searchable PDF'lerde calisir.
+- Scanned PDF/image icin `AI` binding ile Index Engine calistirilmalidir.
+- AI/OCR maliyeti search sirasinda degil, bilerek baslatilan Index Engine run'inda olusur.
+- Index sonuc ve hatalari Logs ekraninda gorulur.
 
 ### 6.9 Logs And Audit
 
@@ -846,8 +852,10 @@ R2 file flow:
 6. Dosya preview edilir.
 7. Upload progress ile dosya yuklenir.
 8. Download veya delete yapilir.
-9. Scanned dokuman icin `Index text` ile OCR text kaydedilir.
-10. Text search bu index'i kullanir.
+9. Settings > Index Engine acilir.
+10. `Index all buckets` basilir.
+11. Index Engine tum bucket'lari gezer, duplicate dosyalari skip eder, text/OCR index'i D1'e yazar.
+12. Text search bu index'i kullanir.
 
 ### 16.5 Log Ile Hata Ayiklama
 
@@ -892,7 +900,7 @@ Hero CTA:
 
 Hero support copy:
 
-Run your own private support inbox, multi-domain routing panel, external email sync, R2 file manager, contacts, signatures, logs, previews, uploads, and OCR-ready search from one Cloudflare-native Worker app.
+Run your own private support inbox, multi-domain routing panel, external email sync, R2 file manager, contacts, signatures, logs, previews, uploads, and indexed OCR/document search from one Cloudflare-native Worker app.
 
 ### Docs
 
@@ -934,7 +942,7 @@ Alternative titles:
 
 Meta description:
 
-OmniDock is an open-source Cloudflare Workers email operations dashboard for Email Routing, Email Sending, D1, R2 bucket management, Gmail and external IMAP/SMTP sync, contacts, signatures, logs, previews, uploads, and OCR-ready search.
+OmniDock is an open-source Cloudflare Workers email operations dashboard for Email Routing, Email Sending, D1, R2 bucket management, Gmail and external IMAP/SMTP sync, contacts, signatures, logs, previews, uploads, and Workers AI backed document search.
 
 Keywords:
 
@@ -951,13 +959,13 @@ Keywords:
 - external IMAP SMTP accounts
 - R2 attachment storage
 - PDF preview
-- OCR-ready search
+- Workers AI OCR/document search
 - serverless email dashboard
 - multi-domain email routing
 
 GitHub About description:
 
-Open-source Cloudflare email dashboard for Workers, Email Routing, Email Sending, D1, R2 bucket management, support inboxes, Gmail sync, external IMAP/SMTP, previews, uploads, contacts, signatures, logs, and OCR-ready search.
+Open-source Cloudflare email dashboard for Workers, Email Routing, Email Sending, D1, R2 bucket management, support inboxes, Gmail sync, external IMAP/SMTP, previews, uploads, contacts, signatures, logs, and indexed OCR/document search.
 
 GitHub topics:
 
@@ -1016,7 +1024,7 @@ Evet. Primary `MAIL_BUCKET` ve extra R2 bucket'lar UI'da secilebilir. Folder bro
 
 ### OCR var mi?
 
-OmniDock otomatik AI OCR calistirmaz. Scanned PDF veya image icin OCR text'i kullanici `Index text` ile kaydedebilir. Bu sayede sonraki aramalarda dosya bulunabilir. Bu yaklasim "OCR-ready text indexing" olarak anlatilmalidir.
+Evet, Index Engine ile Worker uyumlu OCR/dokuman extraction akisi vardir. Worker'a `AI` binding bagliysa OmniDock Cloudflare Workers AI Markdown Conversion kullanarak PDF, image, Office document ve spreadsheet dosyalarindan text uretir. Uretilen text D1'e kaydedilir ve sonraki aramalar D1 index uzerinden hizli calisir. Search butonu OCR calistirmaz; OCR sadece kullanici Settings > Index Engine altinda bilerek run baslattiginda calisir.
 
 ### Binding neden kopar?
 
@@ -1102,7 +1110,7 @@ Cozum:
 
 - Once current bucket ara.
 - Path search kullan.
-- Gerekli dosyalara `Index text` ekle.
+- Settings > Index Engine ile tum bucket'lari indexle.
 - Logs'ta search duration/time limit/issue kaydini kontrol et.
 
 ### PDF text search sonuc bulmuyor
@@ -1111,12 +1119,15 @@ Sebep:
 
 - PDF scanned image olabilir.
 - PDF text layer icermiyor olabilir.
-- OCR index yoktur.
+- Index Engine henuz calismamis olabilir.
+- Worker'da `AI` binding yoksa scanned PDF/image icin OCR yapilamaz.
 
 Cozum:
 
-- PDF'i ac.
-- `Index text` ile OCR text paste et.
+- `AI` binding'in deployda mevcut oldugunu kontrol et.
+- Settings > Index Engine ac.
+- `Index all buckets` calistir.
+- Logs'ta `bucket.object_indexed` ve `bucket.object_index_failed` satirlarini kontrol et.
 - Tekrar search yap.
 
 ## 21. Kalite Ve UX Notlari
@@ -1190,13 +1201,13 @@ OmniDock is designed for self-hosted Cloudflare deployments. Secrets are not sto
 Asagidaki prompt, baska bir chat'te web sitesi ve docs uretmek icin kullanilabilir:
 
 ```text
-OmniDock adli open-source/self-hosted Cloudflare email operations dashboard icin modern, SEO dostu bir web sitesi ve detayli dokumantasyon olustur. Urun Cloudflare Workers, Email Routing, Email Sending, D1, R2, Gmail/external IMAP-SMTP sync, contacts, signatures, logs, R2 bucket manager, file preview, upload progress, PDF/image/text preview, OCR-ready text indexing, Linux-style dashboard ve fork-first secure deployment ozelliklerine sahip.
+OmniDock adli open-source/self-hosted Cloudflare email operations dashboard icin modern, SEO dostu bir web sitesi ve detayli dokumantasyon olustur. Urun Cloudflare Workers, Email Routing, Email Sending, D1, R2, Workers AI Index Engine, Gmail/external IMAP-SMTP sync, contacts, signatures, logs, R2 bucket manager, file preview, upload progress, PDF/image/text preview, indexed OCR/document search, Linux-style dashboard ve fork-first secure deployment ozelliklerine sahip.
 
 Landing page hero'su marka adini "OmniDock" olarak tasimali. Mesaj: "Open-source email operations for Cloudflare Workers, Email Routing, Email Sending, D1, R2, Gmail sync, and external IMAP/SMTP accounts." Site, SaaS degil self-hosted urun oldugunu acik anlatmali. One-click deploy yerine fork-first deploy yaklasimini savunmali. Cloudflare binding kopmasi problemini ve deploy-preserving command'i net anlatmali.
 
 Docs bolumleri: Introduction, Concepts, Cloudflare preparation, Git deploy, Build variables, Runtime secrets and variables, Bindings, First setup, Mailboxes, Domains and rules, Compose and signatures, Contacts, External accounts, Gmail setup, R2 buckets, Text search and OCR-ready indexes, Logs, Security, Troubleshooting, Upgrades and FAQ.
 
-SEO keywords: Cloudflare email dashboard, Cloudflare Workers email, Cloudflare Email Routing UI, Cloudflare Email Sending dashboard, self-hosted support inbox, Gmail IMAP sync, external IMAP SMTP accounts, R2 bucket manager, D1 email database, PDF preview, OCR-ready search, serverless email dashboard.
+SEO keywords: Cloudflare email dashboard, Cloudflare Workers email, Cloudflare Email Routing UI, Cloudflare Email Sending dashboard, self-hosted support inbox, Gmail IMAP sync, external IMAP SMTP accounts, R2 bucket manager, D1 email database, PDF preview, Workers AI OCR, document search, serverless email dashboard.
 
 Tasarim dili: compact, technical, premium, Linux desktop inspired. Gercek uygulama screenshot'lari ve teknik guven veren copy kullan. Abartili AI iddialari kullanma. Secret-safe, self-hosted, Cloudflare-native ve developer-friendly vurgusu yap.
 ```

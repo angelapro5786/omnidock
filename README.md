@@ -82,7 +82,7 @@ OmniDock is not an IMAP/POP3 server and does not replace a full hosted mailbox p
 - Import contacts manually or from CSV, TXT, and VCF files; edit contacts one by one; store phone, company, tags, and notes.
 - Manage mailbox-specific rich signatures with text style and links.
 - Add external account profiles for Gmail, Outlook, Yahoo, iCloud, or custom IMAP/SMTP settings. OmniDock stores the Worker secret name, not the credential value.
-- Browse one or more configured R2 buckets from the sidebar, open folders, preview PDF/image/text objects, upload files with progress, download files, delete files, and save searchable OCR/text indexes for scanned documents without automatic AI spend.
+- Browse one or more configured R2 buckets from the sidebar, create folders, preview PDF/image/text objects, upload files with progress, download files, delete files, and run a D1-backed Index Engine for searchable text and OCR-style document extraction.
 - Review app activity in Logs, export logs, and delete logs from D1.
 - Choose between five UI palettes: Linux, Ubuntu, Fedora, Plasma, and Graphite.
 - Set a default mailbox and customize automatic refresh timing.
@@ -273,15 +273,16 @@ Do not add `ADMIN_PASSWORD` or `CLOUDFLARE_API_TOKEN` as plaintext variables.
 
 ## Required Bindings
 
-D1, R2, and Email Sending are bindings, not secrets.
+D1, R2, Email Sending, and Workers AI are bindings, not secrets.
 
 | Binding name | Resource |
 | --- | --- |
 | `DB` | Cloudflare D1 database |
 | `MAIL_BUCKET` | Cloudflare R2 bucket |
 | `EMAIL` | Cloudflare Email Sending binding |
+| `AI` | Workers AI binding for Index Engine document-to-markdown and OCR-style extraction |
 
-The running Worker must receive `DB` as a D1 binding and `MAIL_BUCKET` as an R2 binding. R2 bucket names are copied into runtime display variables during deploy so the Buckets UI can show real bucket names instead of binding names.
+The running Worker must receive `DB` as a D1 binding and `MAIL_BUCKET` as an R2 binding. The `AI` binding is included in the public config so Index Engine can use Cloudflare Workers AI Markdown Conversion for supported PDFs, images, Office files, and spreadsheets. R2 bucket names are copied into runtime display variables during deploy so the Buckets UI can show real bucket names instead of binding names.
 
 ### Extra R2 Buckets
 
@@ -359,9 +360,9 @@ Other Settings controls automatic refresh. The default is 10 seconds and can be 
 
 ### Buckets
 
-The Buckets sidebar opens a dropdown of configured R2 buckets. `MAIL_BUCKET` is always the primary mail bucket. Extra buckets from `OMNIDOCK_EXTRA_R2_BUCKETS` appear in the same dropdown with their real bucket names. You can browse folder prefixes, preview supported file types, upload files, download objects, and delete objects.
+The Buckets sidebar opens a dropdown of configured R2 buckets. `MAIL_BUCKET` is always the primary mail bucket. Extra buckets from `OMNIDOCK_EXTRA_R2_BUCKETS` appear in the same dropdown with their real bucket names. You can browse folder prefixes, create folders and nested folders, preview supported file types, upload files, download objects, and delete objects.
 
-Bucket search reads filenames, paths, supported text files, extractable PDF text, and saved object text indexes. Scanned PDFs and images do not contain searchable text by default. To avoid surprise AI costs, OmniDock does not run automatic OCR during every search. Open an object, choose `Index text`, and paste OCR text from your preferred local or external OCR tool. OmniDock stores that text in D1 and future searches find the object without re-running OCR.
+Bucket search reads filenames, paths, supported text files, extractable PDF text, and saved object text indexes. OCR and document extraction are handled by Settings > Index Engine, not by the search button. Index Engine scans every configured R2 bucket, skips unchanged objects by ETag and size, extracts text into D1, and writes success or failure rows into Logs. When the Worker has the `AI` binding, supported scanned PDFs, images, Office documents, and spreadsheets are converted through Workers AI Markdown Conversion. Searches then use the saved D1 index instead of re-running OCR on every query.
 
 Preview support is built for common operator workflows:
 
@@ -508,6 +509,7 @@ The seed endpoint is disabled unless `ENABLE_DEV_SEED=true`.
 | Outbound email | Cloudflare Email Sending binding |
 | Metadata | Cloudflare D1 |
 | Raw mail, attachments, manual files | Cloudflare R2 |
+| R2 text index | Cloudflare D1 plus optional Workers AI extraction |
 | Admin auth | D1-stored salted PBKDF2 password hash |
 | Cloudflare automation | Cloudflare API token stored as Worker secret |
 
@@ -560,7 +562,7 @@ Open-source Cloudflare email dashboard for Workers, Email Routing, Email Sending
 Recommended topics:
 
 ```text
-cloudflare cloudflare-workers cloudflare-email-routing cloudflare-email-sending cloudflare-d1 cloudflare-r2 email-dashboard support-inbox self-hosted-email email-routing email-sending r2-storage r2-bucket-manager d1-database gmail-sync imap smtp pdf-preview ocr-indexing react typescript serverless open-source
+cloudflare cloudflare-workers cloudflare-email-routing cloudflare-email-sending cloudflare-d1 cloudflare-r2 workers-ai email-dashboard support-inbox self-hosted-email email-routing email-sending r2-storage r2-bucket-manager d1-database gmail-sync imap smtp pdf-preview ocr-indexing document-search react typescript serverless open-source
 ```
 
 Recommended website URL:
@@ -598,11 +600,11 @@ OmniDock is a self-hosted Cloudflare Workers email dashboard for Email Routing, 
 Short product pitch:
 
 ```text
-OmniDock turns Cloudflare Workers, Email Routing, Email Sending, D1, and R2 into a private email operations dashboard for support inboxes, multi-domain routing, Gmail and external IMAP/SMTP sync, contacts, signatures, attachments, logs, R2 bucket management, file preview, upload workflows, and OCR-ready text search.
+OmniDock turns Cloudflare Workers, Email Routing, Email Sending, D1, R2, and Workers AI into a private email operations dashboard for support inboxes, multi-domain routing, Gmail and external IMAP/SMTP sync, contacts, signatures, attachments, logs, R2 bucket management, file preview, upload workflows, and indexed OCR/document search.
 ```
 
 Search phrases this README intentionally covers:
 
 ```text
-Cloudflare email dashboard, Cloudflare Workers email app, Cloudflare Email Routing UI, Cloudflare Email Sending dashboard, open-source support inbox, self-hosted email management, D1 email database, R2 attachment storage, R2 file manager, R2 bucket manager, Gmail IMAP sync, external SMTP sending, PDF preview, attachment preview, OCR text indexing, serverless email dashboard, multi-domain email inbox.
+Cloudflare email dashboard, Cloudflare Workers email app, Cloudflare Email Routing UI, Cloudflare Email Sending dashboard, open-source support inbox, self-hosted email management, D1 email database, R2 attachment storage, R2 file manager, R2 bucket manager, Workers AI document extraction, Gmail IMAP sync, external SMTP sending, PDF preview, attachment preview, OCR text indexing, serverless email dashboard, multi-domain email inbox.
 ```

@@ -244,6 +244,31 @@ export type BucketTextIndexRow = {
   updated_at: string;
 };
 
+export type BucketIndexJobRow = {
+  id: string;
+  status: "queued" | "running" | "complete" | "failed";
+  bucket_index: number;
+  cursor: string | null;
+  scanned: number;
+  indexed: number;
+  skipped: number;
+  failed: number;
+  ocr_indexed: number;
+  message: string | null;
+  last_error: string | null;
+  lease_until: string | null;
+  started_at: string;
+  updated_at: string;
+  completed_at: string | null;
+};
+
+export type BucketIndexPayload = {
+  ok: true;
+  job: BucketIndexJobRow | null;
+  buckets: BucketRow[];
+  aiConfigured: boolean;
+};
+
 export type BucketTextIndexPayload = {
   ok: true;
   index: BucketTextIndexRow | null;

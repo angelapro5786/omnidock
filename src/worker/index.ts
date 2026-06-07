@@ -1,4 +1,4 @@
-import { handleApi } from "./api";
+import { BUCKET_INDEX_MAX_RUN_MS, handleApi, runBucketIndexJobs } from "./api";
 import { receiveEmail } from "./email";
 import { EXTERNAL_SYNC_MAX_RUN_MS, runExternalSyncJobs } from "./external-sync";
 import { RuntimeEnv, json, withSecurityHeaders } from "./http";
@@ -41,6 +41,11 @@ export default {
     ctx.waitUntil(
       runExternalSyncJobs(runtimeEnv, { maxDurationMs: EXTERNAL_SYNC_MAX_RUN_MS }).catch((error) => {
         console.error("Failed to run external sync jobs", error);
+      })
+    );
+    ctx.waitUntil(
+      runBucketIndexJobs(runtimeEnv, { maxDurationMs: BUCKET_INDEX_MAX_RUN_MS }).catch((error) => {
+        console.error("Failed to run bucket index jobs", error);
       })
     );
   }

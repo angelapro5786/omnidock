@@ -1,5 +1,6 @@
 import {
   BootstrapPayload,
+  BucketIndexPayload,
   BucketObjectsPayload,
   BucketSearchPayload,
   BucketTextIndexPayload,
@@ -242,6 +243,18 @@ export class ApiClient {
     });
   }
 
+  bucketIndexStatus(): Promise<BucketIndexPayload> {
+    return this.request<BucketIndexPayload>("/api/bucket-index");
+  }
+
+  startBucketIndex(): Promise<BucketIndexPayload> {
+    return this.request<BucketIndexPayload>("/api/bucket-index", { method: "POST" });
+  }
+
+  runBucketIndex(): Promise<BucketIndexPayload> {
+    return this.request<BucketIndexPayload>("/api/bucket-index/run", { method: "POST" });
+  }
+
   deleteExternalAccount(id: string): Promise<unknown> {
     return this.request(`/api/external-accounts/${id}`, { method: "DELETE" });
   }
@@ -343,6 +356,13 @@ export class ApiClient {
       body: file
     });
     return readApiResponse(response);
+  }
+
+  createBucketFolder(bucketId: string, prefix: string, path: string): Promise<{ ok: true; folder: { key: string; name: string } }> {
+    return this.request(`/api/buckets/${encodeURIComponent(bucketId)}/folders`, {
+      method: "POST",
+      body: JSON.stringify({ prefix, path })
+    });
   }
 
   async deleteBucketObject(bucketId: string, key: string): Promise<unknown> {

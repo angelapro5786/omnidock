@@ -1,5 +1,6 @@
 export type RuntimeEnv = Env & {
   ADMIN_PASSWORD?: string;
+  AI?: Ai;
   CLOUDFLARE_ACCOUNT_ID?: string;
   CLOUDFLARE_API_TOKEN?: string;
   DB: D1Database;
