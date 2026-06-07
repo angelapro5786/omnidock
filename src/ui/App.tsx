@@ -676,7 +676,7 @@ function AppContent() {
   }, [api, bootstrap, loadThreads, refreshIntervalSeconds, view]);
 
   useEffect(() => {
-    if (busy || syncLog === "Ready" || syncLog === "Locked" || /\brunning\b/i.test(syncLog)) return;
+    if (busy || syncLog === "Ready" || syncLog === "Locked") return;
     const timer = window.setTimeout(() => {
       setSyncLog("Ready");
     }, 9000);
@@ -2076,6 +2076,7 @@ function Sidebar({
   const toolsViews = new Set<ViewKey>(["notes"]);
   const [settingsOpen, setSettingsOpen] = useState(() => settingsViews.has(view));
   const [toolsOpen, setToolsOpen] = useState(() => toolsViews.has(view));
+  const settingsItemCount = 7;
 
   useEffect(() => {
     if (settingsViews.has(view)) setSettingsOpen(true);
@@ -2137,7 +2138,7 @@ function Sidebar({
         />
       </div>
 
-      <div className="sidebar-section">
+      <div className="sidebar-section tools-section">
         <button className="section-title section-toggle" type="button" onClick={() => setToolsOpen((current) => !current)}>
           {toolsOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           <span>Tools</span>
@@ -2154,12 +2155,12 @@ function Sidebar({
         ) : null}
       </div>
 
-      <div className="sidebar-section">
+      <div className="sidebar-section settings-section">
         <button className="section-title section-toggle" type="button" onClick={() => setSettingsOpen((current) => !current)}>
           {settingsOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           <Settings size={14} />
           <span>Settings</span>
-          <b>{settingsOpen ? "open" : "closed"}</b>
+          <b>{settingsItemCount}</b>
         </button>
         {settingsOpen ? (
           <div className="sidebar-submenu">
@@ -3936,7 +3937,7 @@ function NotesView({
   const activeBucket =
     writableBuckets.find((bucket) => bucket.id === activeBucketId) ?? writableBuckets[0] ?? buckets.find((bucket) => bucket.id === activeBucketId) ?? null;
   const [folderPath, setFolderPath] = useState("notes");
-  const [filename, setFilename] = useState(() => `note-${new Date().toISOString().slice(0, 10)}.txt`);
+  const [filename, setFilename] = useState(defaultNoteFilename);
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
   const bucketOptions = bucketOptionsForSelect(buckets);
@@ -3969,7 +3970,7 @@ function NotesView({
       await api.uploadBucketObject(activeBucket.id, objectKey, file);
       onNotice(`Note saved to ${activeBucket.name}/${objectKey}`);
       setContent("");
-      setFilename(`note-${new Date().toISOString().slice(0, 10)}.txt`);
+      setFilename(defaultNoteFilename());
     } catch (error) {
       onNotice(readError(error));
     } finally {
@@ -6108,8 +6109,20 @@ function normalizeNotesPrefix(value: string): string {
 }
 
 function normalizeNoteFilename(value: string): string {
-  const normalized = value.replace(/[\\/\u0000-\u001f\u007f]/g, "_").trim() || `note-${new Date().toISOString().slice(0, 10)}.txt`;
+  const normalized = value.replace(/[\\/\u0000-\u001f\u007f]/g, "_").trim() || defaultNoteFilename();
   return /\.[a-z0-9]{1,8}$/i.test(normalized) ? normalized : `${normalized}.txt`;
+}
+
+function defaultNoteFilename(): string {
+  const now = new Date();
+  const pad = (value: number, length = 2) => String(value).padStart(length, "0");
+  const stamp = [
+    now.getFullYear(),
+    pad(now.getMonth() + 1),
+    pad(now.getDate())
+  ].join("-");
+  const time = [pad(now.getHours()), pad(now.getMinutes()), pad(now.getSeconds()), pad(now.getMilliseconds(), 3)].join("-");
+  return `note-${stamp}_${time}.txt`;
 }
 
 function prefixParts(prefix: string): { name: string; prefix: string }[] {

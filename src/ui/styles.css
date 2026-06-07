@@ -373,6 +373,10 @@ button:hover:not(:disabled) {
   min-height: 0;
 }
 
+.tools-section + .settings-section {
+  margin-top: -10px;
+}
+
 .section-title {
   display: flex;
   align-items: center;

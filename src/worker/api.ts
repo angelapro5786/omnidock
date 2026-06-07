@@ -75,6 +75,13 @@ import {
   requiredString,
   stringList
 } from "./http";
+import {
+  extractOpenXmlOfficeText,
+  extractTextualLegacyOfficeText,
+  isLegacyOfficeCandidate,
+  isOpenXmlOfficeCandidate,
+  officeContentTypeForFilename
+} from "./ooxml";
 
 export async function handleApi(
   request: Request,
@@ -1723,19 +1730,25 @@ async function extractBucketIndexText(
   const contentType = object.httpMetadata?.contentType?.toLowerCase() ?? "";
   const lowerKey = object.key.toLowerCase();
 
-  if (isAiMarkdownCandidate(object)) {
-    if (isAiBinding(env.AI)) {
-      try {
-        const text = await extractMarkdownWithWorkersAi(env.AI, bucket.bucket, object, deadlineMs);
-        if (text.trim()) {
-          return { status: "indexed", text, source: "workers-ai-tomarkdown", ocr: true };
-        }
-      } catch (error) {
-        if (!isPdfSearchCandidate(object)) throw error;
-      }
-    } else if (!isPdfSearchCandidate(object) && !isTextLikeObject(object)) {
-      return { status: "skipped", reason: "Workers AI binding AI is not configured for OCR" };
+  if (isOpenXmlOfficeCandidate(lowerKey, contentType)) {
+    const body = await bucket.bucket.get(object.key);
+    if (!body) return { status: "skipped", reason: "Object disappeared before indexing" };
+    const extraction = extractOpenXmlOfficeText(await body.arrayBuffer());
+    return extraction?.text.trim()
+      ? { status: "indexed", text: extraction.text, source: extraction.source, ocr: false }
+      : { status: "skipped", reason: "Office XML text could not be extracted" };
+  }
+
+  if (isLegacyOfficeCandidate(lowerKey, contentType)) {
+    if (object.size > BUCKET_INDEX_TEXT_MAX_BYTES) {
+      return { status: "skipped", reason: "Legacy Office file is too large for text fallback" };
     }
+    const body = await bucket.bucket.get(object.key);
+    if (!body) return { status: "skipped", reason: "Object disappeared before indexing" };
+    const text = extractTextualLegacyOfficeText(await body.arrayBuffer());
+    return text?.trim()
+      ? { status: "indexed", text, source: "legacy-office-text", ocr: false }
+      : { status: "skipped", reason: "Legacy binary Office files need DOCX/XLSX/PPTX for AI-free preview" };
   }
 
   if (isPdfSearchCandidate(object)) {
@@ -1745,9 +1758,12 @@ async function extractBucketIndexText(
     const body = await bucket.bucket.get(object.key);
     if (!body) return { status: "skipped", reason: "Object disappeared before indexing" };
     const text = await extractPdfText(await body.arrayBuffer(), deadlineMs);
-    return text.trim()
-      ? { status: "indexed", text, source: "pdf-text-layer", ocr: false }
-      : { status: "skipped", reason: "No extractable PDF text and OCR is unavailable" };
+    if (text.trim()) return { status: "indexed", text, source: "pdf-text-layer", ocr: false };
+    if (!isAiBinding(env.AI)) return { status: "skipped", reason: "No extractable PDF text layer and AI OCR is not configured" };
+    const aiText = await extractMarkdownWithWorkersAi(env.AI, bucket.bucket, object, deadlineMs);
+    return aiText.trim()
+      ? { status: "indexed", text: aiText, source: "workers-ai-tomarkdown", ocr: true }
+      : { status: "skipped", reason: "No extractable PDF text" };
   }
 
   if (isTextLikeObject(object)) {
@@ -1760,6 +1776,16 @@ async function extractBucketIndexText(
     return text.trim()
       ? { status: "indexed", text, source: contentType.includes("html") || lowerKey.endsWith(".html") ? "html-text" : "text", ocr: false }
       : { status: "skipped", reason: "Empty text" };
+  }
+
+  if (isAiMarkdownCandidate(object)) {
+    if (!isAiBinding(env.AI)) {
+      return { status: "skipped", reason: "Workers AI binding AI is not configured for image OCR" };
+    }
+    const text = await extractMarkdownWithWorkersAi(env.AI, bucket.bucket, object, deadlineMs);
+    return text.trim()
+      ? { status: "indexed", text, source: "workers-ai-tomarkdown", ocr: true }
+      : { status: "skipped", reason: "No text could be extracted" };
   }
 
   return { status: "skipped", reason: "Unsupported index format" };
@@ -1827,39 +1853,17 @@ function isAiMarkdownCandidate(object: R2Object): boolean {
   const contentType = object.httpMetadata?.contentType?.toLowerCase() ?? "";
   const filename = object.key.toLowerCase();
   const markdownExtensions = [
-    ".pdf",
     ".png",
     ".jpg",
     ".jpeg",
     ".webp",
     ".gif",
     ".bmp",
-    ".svg",
-    ".doc",
-    ".docx",
-    ".word",
-    ".wordx",
-    ".ppt",
-    ".pptx",
-    ".xls",
-    ".xlsx",
-    ".odt",
-    ".ods",
-    ".odp",
-    ".csv",
-    ".html"
+    ".svg"
   ];
   return (
     object.size <= BUCKET_INDEX_AI_MAX_BYTES &&
     (contentType.startsWith("image/") ||
-      contentType === "application/pdf" ||
-      contentType.includes("officedocument") ||
-      contentType.includes("spreadsheet") ||
-      contentType.includes("presentation") ||
-      contentType.includes("msword") ||
-      contentType.includes("ms-excel") ||
-      contentType.includes("ms-powerpoint") ||
-      contentType.includes("opendocument") ||
       markdownExtensions.some((extension) => filename.endsWith(extension)))
   );
 }
@@ -1889,7 +1893,7 @@ function contentTypeForIndexObject(object: R2Object): string {
 }
 
 function objectWithPreviewContentType(object: R2Object, filename: string, storedContentType: string | null): R2Object {
-  const contentType = contentTypeForPreviewFilename(filename, storedContentType ?? object.httpMetadata?.contentType ?? null);
+  const contentType = officeContentTypeForFilename(filename, storedContentType ?? object.httpMetadata?.contentType ?? null);
   if (!contentType || contentType === object.httpMetadata?.contentType) return object;
   return {
     ...object,
@@ -1899,22 +1903,6 @@ function objectWithPreviewContentType(object: R2Object, filename: string, stored
     },
     writeHttpMetadata: object.writeHttpMetadata.bind(object)
   };
-}
-
-function contentTypeForPreviewFilename(filenameInput: string, currentContentType: string | null): string | null {
-  const current = currentContentType?.trim();
-  if (current && current.toLowerCase() !== "application/octet-stream") return current;
-  const filename = filenameInput.toLowerCase();
-  if (filename.endsWith(".doc") || filename.endsWith(".word")) return "application/msword";
-  if (filename.endsWith(".docx") || filename.endsWith(".wordx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-  if (filename.endsWith(".ppt")) return "application/vnd.ms-powerpoint";
-  if (filename.endsWith(".pptx")) return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
-  if (filename.endsWith(".xls")) return "application/vnd.ms-excel";
-  if (filename.endsWith(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-  if (filename.endsWith(".odt")) return "application/vnd.oasis.opendocument.text";
-  if (filename.endsWith(".ods")) return "application/vnd.oasis.opendocument.spreadsheet";
-  if (filename.endsWith(".odp")) return "application/vnd.oasis.opendocument.presentation";
-  return current || null;
 }
 
 function snippetForNormalizedText(text: string, normalizedQuery: string): string | null {

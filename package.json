@@ -42,7 +42,12 @@
   },
   "cloudflare": {
     "label": "OmniDock",
-    "products": ["Workers", "D1", "R2", "Workers AI"],
+    "products": [
+      "Workers",
+      "D1",
+      "R2",
+      "Workers AI"
+    ],
     "bindings": {
       "DB": {
         "description": "Required D1 database. Keep the generated `database_id` in installed copies so updates reuse the same database."
@@ -57,6 +62,7 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "6.0.2",
+    "fflate": "^0.8.3",
     "lucide-react": "1.17.0",
     "postal-mime": "2.7.4",
     "react": "19.2.7",
