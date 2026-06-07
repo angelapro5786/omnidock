@@ -2626,7 +2626,6 @@ function ExternalAccountsView({
   const [busy, setBusy] = useState(false);
   const dialog = useAppDialog();
   const credentialSecretName = externalCredentialSecretName(draft.email);
-  const credentialSecretIssue = externalCredentialSecretIssue(draft);
 
   useEffect(() => {
     if (selectedId && !accounts.some((account) => account.id === selectedId)) {
@@ -2666,36 +2665,19 @@ function ExternalAccountsView({
   }
 
   function changeEmail(email: string) {
-    setDraft((current) => {
-      const shouldMirrorUsername = !current.username?.trim() || current.username.trim() === current.email.trim();
-
-      return {
-        ...current,
-        email,
-        username: shouldMirrorUsername ? email : current.username
-      };
-    });
-  }
-
-  async function copyExternalText(value: string, message: string) {
-    if (!value) return;
-    await navigator.clipboard.writeText(value);
-    onNotice(message);
+    setDraft((current) => ({ ...current, email }));
   }
 
   async function saveAccount(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!api || !draft.email.trim()) return;
-    if (credentialSecretIssue) {
-      onNotice(credentialSecretIssue);
-      return;
-    }
 
     setBusy(true);
     try {
       const result = await api.saveExternalAccount(
         {
           ...draft,
+          username: draft.email.trim(),
           credentialSecretName: credentialSecretName || null
         },
         selectedId
@@ -2806,14 +2788,6 @@ function ExternalAccountsView({
                 <input value={draft.displayName ?? ""} onChange={(event) => updateDraft({ displayName: event.target.value })} />
               </label>
               <label>
-                Username
-                <input
-                  value={draft.username ?? ""}
-                  onChange={(event) => updateDraft({ username: event.target.value })}
-                  placeholder={draft.email || "name@gmail.com"}
-                />
-              </label>
-              <label>
                 Auth
                 <CustomSelect
                   value={draft.authType}
@@ -2825,22 +2799,6 @@ function ExternalAccountsView({
                   ]}
                 />
               </label>
-            </div>
-
-            <div className="external-secret-note">
-              <div>
-                <span>Cloudflare secret name</span>
-                <code>{credentialSecretName || "name@gmail.com"}</code>
-              </div>
-              <button
-                className="button mini"
-                type="button"
-                onClick={() => void copyExternalText(credentialSecretName, "Secret name copied")}
-                disabled={!credentialSecretName}
-              >
-                <Copy size={13} />
-                Copy
-              </button>
             </div>
 
             <div className="external-toggle-row">
@@ -2982,14 +2940,6 @@ function externalProviderLabel(provider: string): string {
 
 function externalCredentialSecretName(email: string): string {
   return email.trim().toLowerCase();
-}
-
-function externalCredentialSecretIssue(draft: ExternalAccountInput): string | null {
-  if (draft.authType === "none") return null;
-  if (!draft.email.trim()) {
-    return "Enter the external email address first. OmniDock uses that same email as the Cloudflare secret name.";
-  }
-  return null;
 }
 
 function OtherSettingsView({
