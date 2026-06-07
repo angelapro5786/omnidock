@@ -1170,7 +1170,11 @@ function readExternalAccountInput(body: Record<string, unknown>): {
   const credentialSecretName = optionalString(body, "credentialSecretName", { max: 128 });
 
   if (credentialSecretName && !/^[A-Z_][A-Z0-9_]*$/i.test(credentialSecretName)) {
-    throw new ApiError(400, "invalid_secret_name", "Credential secret name must look like a Worker secret name");
+    throw new ApiError(
+      400,
+      "invalid_secret_name",
+      "Enter a Worker secret name like GMAIL_APP_SECRET_NAME_AT_GMAIL_DOT_COM. Do not paste the email password itself."
+    );
   }
 
   return {
@@ -1179,7 +1183,7 @@ function readExternalAccountInput(body: Record<string, unknown>): {
     displayName: optionalString(body, "displayName", { max: 160 }),
     username: optionalString(body, "username", { max: 320 }),
     authType,
-    credentialSecretName,
+    credentialSecretName: credentialSecretName ? credentialSecretName.toUpperCase() : null,
     imapHost: optionalString(body, "imapHost", { max: 253 }),
     imapPort: optionalPort(body, "imapPort"),
     imapSecurity,

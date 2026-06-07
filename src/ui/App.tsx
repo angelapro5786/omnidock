@@ -2625,6 +2625,9 @@ function ExternalAccountsView({
   const [draft, setDraft] = useState<ExternalAccountInput>(() => createExternalDraft("gmail"));
   const [busy, setBusy] = useState(false);
   const dialog = useAppDialog();
+  const credentialSecretName = (draft.credentialSecretName ?? "").trim().toUpperCase();
+  const credentialSecretIssue = externalCredentialSecretIssue(draft);
+  const credentialSecretCommand = credentialSecretName ? `npx wrangler secret put ${credentialSecretName}` : "";
 
   useEffect(() => {
     if (selectedId && !accounts.some((account) => account.id === selectedId)) {
@@ -2651,25 +2654,68 @@ function ExternalAccountsView({
 
   function changeProvider(provider: string) {
     const preset = externalProviderPresets[provider] ?? externalProviderPresets.custom;
-    setDraft((current) => ({
-      ...current,
-      provider,
-      imapHost: preset.imapHost,
-      imapPort: preset.imapPort,
-      imapSecurity: preset.imapSecurity,
-      smtpHost: preset.smtpHost,
-      smtpPort: preset.smtpPort,
-      smtpSecurity: preset.smtpSecurity
-    }));
+    setDraft((current) => {
+      const previousSecretName = externalCredentialSecretName(current.provider, current.email);
+      const previousLegacySecretName = externalLegacyCredentialSecretName(current.provider, current.email);
+      const shouldGenerateSecretName =
+        !current.credentialSecretName?.trim() ||
+        [previousSecretName, previousLegacySecretName].includes(current.credentialSecretName.trim().toUpperCase());
+
+      return {
+        ...current,
+        provider,
+        credentialSecretName: shouldGenerateSecretName ? externalCredentialSecretName(provider, current.email) : current.credentialSecretName,
+        imapHost: preset.imapHost,
+        imapPort: preset.imapPort,
+        imapSecurity: preset.imapSecurity,
+        smtpHost: preset.smtpHost,
+        smtpPort: preset.smtpPort,
+        smtpSecurity: preset.smtpSecurity
+      };
+    });
+  }
+
+  function changeEmail(email: string) {
+    setDraft((current) => {
+      const previousSecretName = externalCredentialSecretName(current.provider, current.email);
+      const previousLegacySecretName = externalLegacyCredentialSecretName(current.provider, current.email);
+      const shouldGenerateSecretName =
+        !current.credentialSecretName?.trim() ||
+        [previousSecretName, previousLegacySecretName].includes(current.credentialSecretName.trim().toUpperCase());
+      const shouldMirrorUsername = !current.username?.trim() || current.username.trim() === current.email.trim();
+
+      return {
+        ...current,
+        email,
+        username: shouldMirrorUsername ? email : current.username,
+        credentialSecretName: shouldGenerateSecretName ? externalCredentialSecretName(current.provider, email) : current.credentialSecretName
+      };
+    });
+  }
+
+  async function copyExternalText(value: string, message: string) {
+    if (!value) return;
+    await navigator.clipboard.writeText(value);
+    onNotice(message);
   }
 
   async function saveAccount(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!api || !draft.email.trim()) return;
+    if (credentialSecretIssue) {
+      onNotice(credentialSecretIssue);
+      return;
+    }
 
     setBusy(true);
     try {
-      const result = await api.saveExternalAccount(draft, selectedId);
+      const result = await api.saveExternalAccount(
+        {
+          ...draft,
+          credentialSecretName: credentialSecretName || null
+        },
+        selectedId
+      );
       setSelectedId(result.account.id);
       await onChange();
       onNotice("External account saved");
@@ -2766,7 +2812,7 @@ function ExternalAccountsView({
                 Email
                 <input
                   value={draft.email}
-                  onChange={(event) => updateDraft({ email: event.target.value })}
+                  onChange={(event) => changeEmail(event.target.value)}
                   placeholder="name@gmail.com"
                   autoComplete="email"
                 />
@@ -2795,15 +2841,47 @@ function ExternalAccountsView({
                   ]}
                 />
               </label>
-              <label>
-                Credential secret
-                <input
-                  value={draft.credentialSecretName ?? ""}
-                  onChange={(event) => updateDraft({ credentialSecretName: event.target.value.toUpperCase() })}
-                  placeholder="GMAIL_ACCOUNT_PASSWORD"
-                />
+              <label className="secret-name-field">
+                Cloudflare secret name
+                <div className="field-with-button">
+                  <input
+                    value={draft.credentialSecretName ?? ""}
+                    onChange={(event) => updateDraft({ credentialSecretName: event.target.value.toUpperCase() })}
+                    placeholder="GMAIL_APP_SECRET_NAME_AT_GMAIL_DOT_COM"
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                  <button
+                    className="button icon-only"
+                    type="button"
+                    onClick={() => void copyExternalText(credentialSecretName, "Secret name copied")}
+                    disabled={!credentialSecretName}
+                    title="Copy secret name"
+                  >
+                    <Copy size={15} />
+                  </button>
+                </div>
+                <span className={credentialSecretIssue ? "field-warning" : "field-help"}>
+                  {credentialSecretIssue ??
+                    "Save only the Worker secret name here. Put the real Gmail app password in Cloudflare as that secret value."}
+                </span>
               </label>
             </div>
+
+            {credentialSecretCommand ? (
+              <div className="secret-command">
+                <code>{credentialSecretCommand}</code>
+                <button
+                  className="button mini"
+                  type="button"
+                  onClick={() => void copyExternalText(credentialSecretCommand, "Wrangler command copied")}
+                  title="Copy Wrangler command"
+                >
+                  <Copy size={13} />
+                  Copy command
+                </button>
+              </div>
+            ) : null}
 
             <div className="external-toggle-row">
               <label className="check-row">
@@ -2940,6 +3018,55 @@ function externalDraftFromRow(account: ExternalAccountRow): ExternalAccountInput
 
 function externalProviderLabel(provider: string): string {
   return externalProviderPresets[provider]?.label ?? provider;
+}
+
+function externalCredentialSecretName(provider: string, email: string): string {
+  const providerPart = cleanSecretSegment(provider) || "EXTERNAL";
+  const accountPart = cleanEmailSecretSegment(email || "account") || "ACCOUNT";
+  return `${providerPart.slice(0, 24)}_APP_SECRET_${accountPart.slice(0, 86)}`;
+}
+
+function externalLegacyCredentialSecretName(provider: string, email: string): string {
+  const providerPart = cleanSecretSegment(provider) || "EXTERNAL";
+  const localPart = cleanSecretSegment(email.split("@")[0] || "ACCOUNT") || "ACCOUNT";
+  return `${providerPart.slice(0, 24)}_${localPart.slice(0, 80)}_PASSWORD`;
+}
+
+function cleanSecretSegment(value: string): string {
+  return value
+    .replace(/[ıİ]/g, (char) => (char === "ı" ? "i" : "I"))
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toUpperCase();
+}
+
+function cleanEmailSecretSegment(value: string): string {
+  return cleanSecretSegment(
+    value
+      .trim()
+      .replace(/@/g, "_AT_")
+      .replace(/\./g, "_DOT_")
+      .replace(/\+/g, "_PLUS_")
+      .replace(/-/g, "_DASH_")
+  );
+}
+
+function isWorkerSecretName(value: string): boolean {
+  return /^[A-Z_][A-Z0-9_]*$/.test(value);
+}
+
+function externalCredentialSecretIssue(draft: ExternalAccountInput): string | null {
+  if (draft.authType === "none") return null;
+  const value = (draft.credentialSecretName ?? "").trim().toUpperCase();
+  if (!value) {
+    return "Enter a Worker secret name, for example GMAIL_APP_SECRET_NAME_AT_GMAIL_DOT_COM. Do not paste the password itself.";
+  }
+  if (!isWorkerSecretName(value)) {
+    return "This must be a Worker secret name like GMAIL_APP_SECRET_NAME_AT_GMAIL_DOT_COM. Do not paste the Gmail app password itself.";
+  }
+  return null;
 }
 
 function OtherSettingsView({

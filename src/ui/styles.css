@@ -789,6 +789,11 @@ button:hover:not(:disabled) {
   color: var(--accent-strong);
 }
 
+.button.icon-only {
+  width: 34px;
+  padding: 0;
+}
+
 .button.wide {
   width: 100%;
 }
@@ -1681,6 +1686,49 @@ button:hover:not(:disabled) {
 .stack-form textarea:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.field-with-button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.field-help,
+.field-warning {
+  margin-top: 1px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.field-help {
+  color: var(--muted);
+}
+
+.field-warning {
+  color: var(--warn);
+}
+
+.secret-command {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-alt);
+}
+
+.secret-command code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--accent-strong);
+  font: 12px/1.2 var(--mono);
 }
 
 .file-drop {
