@@ -416,6 +416,11 @@ button:hover:not(:disabled) {
   color: var(--accent-strong);
 }
 
+.sidebar-submenu {
+  display: grid;
+  gap: 4px;
+}
+
 .domain-scroll {
   gap: 4px;
   max-height: 300px;
@@ -1333,7 +1338,7 @@ button:hover:not(:disabled) {
 .bucket-layout {
   display: grid;
   flex: 1 1 auto;
-  grid-template-columns: minmax(240px, 320px) minmax(380px, 520px) minmax(440px, 1fr);
+  grid-template-columns: minmax(220px, 300px) minmax(300px, 430px) minmax(620px, 1fr);
   gap: 12px;
   min-height: 0;
 }
@@ -1544,20 +1549,19 @@ button:hover:not(:disabled) {
 .bucket-upload-entries {
   display: grid;
   gap: 5px;
-  max-height: 156px;
+  max-height: 184px;
   overflow: auto;
 }
 
 .bucket-upload-entry {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr) max-content;
-  grid-template-rows: 17px 14px;
+  grid-template-rows: 18px 16px;
   align-items: center;
   gap: 8px;
-  min-height: 40px;
-  max-height: 42px;
+  min-height: 52px;
   overflow: hidden;
-  padding: 6px 8px;
+  padding: 7px 8px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--panel);
@@ -1595,8 +1599,13 @@ button:hover:not(:disabled) {
   display: block;
   min-width: 0;
   overflow: hidden;
+  line-height: 1.05;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.bucket-upload-entry strong {
+  font-size: 12px;
 }
 
 .bucket-upload-entry small {
@@ -1607,6 +1616,72 @@ button:hover:not(:disabled) {
   max-width: 150px;
   overflow: hidden;
   text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notes-shell {
+  padding: 18px;
+}
+
+.notes-editor {
+  max-width: 980px;
+}
+
+.notes-form {
+  display: grid;
+  gap: 12px;
+}
+
+.notes-destination-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(180px, 1fr) minmax(180px, 1fr);
+  gap: 10px;
+}
+
+.notes-form label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.notes-form input,
+.notes-form textarea,
+.notes-form .custom-select-trigger {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--control);
+  color: var(--text);
+}
+
+.notes-form input,
+.notes-form .custom-select-trigger {
+  height: 36px;
+  padding: 0 10px;
+}
+
+.notes-form textarea {
+  min-height: 360px;
+  resize: vertical;
+  padding: 12px;
+  line-height: 1.55;
+}
+
+.notes-save-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.notes-save-row span {
+  overflow: hidden;
+  color: var(--muted);
+  font: 12px/1.2 var(--mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3226,6 +3301,18 @@ button:hover:not(:disabled) {
   white-space: pre-wrap;
 }
 
+.office-preview {
+  min-height: 420px;
+}
+
+.office-preview-stack {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+  min-height: 0;
+  height: 100%;
+}
+
 .preview-loading,
 .preview-fallback {
   display: grid;
@@ -3406,6 +3493,10 @@ button:hover:not(:disabled) {
     grid-column: 1 / -1;
     justify-content: flex-end;
   }
+
+  .bucket-layout {
+    grid-template-columns: minmax(180px, 240px) minmax(240px, 320px) minmax(360px, 1fr);
+  }
 }
 
 @media (max-width: 920px) {
@@ -3480,6 +3571,11 @@ button:hover:not(:disabled) {
 
   .bucket-toolbar,
   .bucket-searchbar {
+    grid-template-columns: 1fr;
+  }
+
+  .notes-destination-grid,
+  .notes-save-row {
     grid-template-columns: 1fr;
   }
 

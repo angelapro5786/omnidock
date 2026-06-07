@@ -95,7 +95,7 @@ const folders: { key: FolderKey; label: string; icon: typeof Inbox }[] = [
   { key: "archive", label: "Archive", icon: Archive }
 ];
 
-type ViewKey = "mail" | "buckets" | "rules" | "contacts" | "signatures" | "external" | "logs" | "index-engine" | "other-settings";
+type ViewKey = "mail" | "buckets" | "rules" | "contacts" | "signatures" | "external" | "logs" | "index-engine" | "notes" | "other-settings";
 type PaletteKey = "mint" | "ubuntu" | "fedora" | "plasma" | "graphite";
 type SettingsViewKey = Exclude<ViewKey, "mail" | "buckets">;
 type AuthViewKey = "checking" | "configuration" | "login" | "setup" | "reset-request" | "reset-confirm";
@@ -609,6 +609,7 @@ function AppContent() {
         await loadBootstrap();
         await loadThreads({ preserveSelection: true });
         const moreText = result.timedOut ? " More mail remains; run Sync again to continue from the saved cursor." : "";
+        setSyncLog(`External sync ${result.timedOut ? "paused" : "complete"}: ${formatExternalSyncSummary(result)}`);
         setNotice(`External mail synced: ${formatExternalSyncSummary(result)}.${moreText}`);
       })
       .catch((error) => {
@@ -673,6 +674,14 @@ function AppContent() {
 
     return () => window.clearInterval(interval);
   }, [api, bootstrap, loadThreads, refreshIntervalSeconds, view]);
+
+  useEffect(() => {
+    if (busy || syncLog === "Ready" || syncLog === "Locked" || /\brunning\b/i.test(syncLog)) return;
+    const timer = window.setTimeout(() => {
+      setSyncLog("Ready");
+    }, 9000);
+    return () => window.clearTimeout(timer);
+  }, [busy, syncLog]);
 
   useEffect(() => {
     if (activeThreadId) {
@@ -1123,6 +1132,14 @@ function AppContent() {
           <LogsView api={api} onNotice={setNotice} />
         ) : view === "index-engine" ? (
           <IndexEngineView api={api} buckets={buckets} onNotice={setNotice} />
+        ) : view === "notes" ? (
+          <NotesView
+            api={api}
+            buckets={buckets}
+            activeBucketId={selectedBucketId}
+            onBucketChange={setSelectedBucketId}
+            onNotice={setNotice}
+          />
         ) : view === "other-settings" ? (
           <OtherSettingsView
             refreshIntervalSeconds={refreshIntervalSeconds}
@@ -1947,6 +1964,11 @@ function SettingsTitle({
       subtitle: "R2 text and OCR index",
       icon: FileText
     },
+    notes: {
+      title: "Notes",
+      subtitle: "Create text files in R2",
+      icon: FileText
+    },
     "other-settings": {
       title: "Other Settings",
       subtitle: "Refresh and interface",
@@ -2050,6 +2072,15 @@ function Sidebar({
 }) {
   const bucketOptions = bucketOptionsForSelect(buckets);
   const mailboxOptions = combinedMailboxOptions(mailboxes, externalAccounts);
+  const settingsViews = new Set<ViewKey>(["rules", "contacts", "signatures", "external", "logs", "index-engine", "other-settings"]);
+  const toolsViews = new Set<ViewKey>(["notes"]);
+  const [settingsOpen, setSettingsOpen] = useState(() => settingsViews.has(view));
+  const [toolsOpen, setToolsOpen] = useState(() => toolsViews.has(view));
+
+  useEffect(() => {
+    if (settingsViews.has(view)) setSettingsOpen(true);
+    if (toolsViews.has(view)) setToolsOpen(true);
+  }, [view]);
 
   return (
     <aside className="sidebar">
@@ -2107,49 +2138,72 @@ function Sidebar({
       </div>
 
       <div className="sidebar-section">
-        <div className="section-title">
+        <button className="section-title section-toggle" type="button" onClick={() => setToolsOpen((current) => !current)}>
+          {toolsOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          <span>Tools</span>
+          <b>1</b>
+        </button>
+        {toolsOpen ? (
+          <div className="sidebar-submenu">
+            <button className={view === "notes" ? "settings-link active" : "settings-link"} type="button" onClick={() => onSettingsOpen("notes")}>
+              <FileText size={16} />
+              <span>Notes</span>
+              <b>TXT</b>
+            </button>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="sidebar-section">
+        <button className="section-title section-toggle" type="button" onClick={() => setSettingsOpen((current) => !current)}>
+          {settingsOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           <Settings size={14} />
-          Settings
-        </div>
-        <button className={view === "rules" ? "settings-link active" : "settings-link"} type="button" onClick={() => onSettingsOpen("rules")}>
-          <FolderGit2 size={16} />
-          <span>Rules</span>
-          <b>{stats.mailboxes ?? 0}</b>
+          <span>Settings</span>
+          <b>{settingsOpen ? "open" : "closed"}</b>
         </button>
-        <button className={view === "contacts" ? "settings-link active" : "settings-link"} type="button" onClick={() => onSettingsOpen("contacts")}>
-          <Users size={16} />
-          <span>Contacts</span>
-          <b>{stats.contacts ?? 0}</b>
-        </button>
-        <button className={view === "signatures" ? "settings-link active" : "settings-link"} type="button" onClick={() => onSettingsOpen("signatures")}>
-          <PenLine size={16} />
-          <span>Signatures</span>
-          <b>{stats.mailboxes ?? 0}</b>
-        </button>
-        <button className={view === "external" ? "settings-link active" : "settings-link"} type="button" onClick={() => onSettingsOpen("external")}>
-          <Mail size={16} />
-          <span>External</span>
-          <b>{stats.external_accounts ?? 0}</b>
-        </button>
-        <button className={view === "logs" ? "settings-link active" : "settings-link"} type="button" onClick={() => onSettingsOpen("logs")}>
-          <TerminalSquare size={16} />
-          <span>Logs</span>
-          <b>{stats.audit_logs ?? 0}</b>
-        </button>
-        <button className={view === "index-engine" ? "settings-link active" : "settings-link"} type="button" onClick={() => onSettingsOpen("index-engine")}>
-          <FileText size={16} />
-          <span>Index Engine</span>
-          <b>OCR</b>
-        </button>
-        <button
-          className={view === "other-settings" ? "settings-link active" : "settings-link"}
-          type="button"
-          onClick={() => onSettingsOpen("other-settings")}
-        >
-          <SlidersHorizontal size={16} />
-          <span>Other Settings</span>
-          <b>{refreshIntervalSeconds > 0 ? `${refreshIntervalSeconds}s` : "Off"}</b>
-        </button>
+        {settingsOpen ? (
+          <div className="sidebar-submenu">
+            <button className={view === "rules" ? "settings-link active" : "settings-link"} type="button" onClick={() => onSettingsOpen("rules")}>
+              <FolderGit2 size={16} />
+              <span>Rules</span>
+              <b>{stats.mailboxes ?? 0}</b>
+            </button>
+            <button className={view === "contacts" ? "settings-link active" : "settings-link"} type="button" onClick={() => onSettingsOpen("contacts")}>
+              <Users size={16} />
+              <span>Contacts</span>
+              <b>{stats.contacts ?? 0}</b>
+            </button>
+            <button className={view === "signatures" ? "settings-link active" : "settings-link"} type="button" onClick={() => onSettingsOpen("signatures")}>
+              <PenLine size={16} />
+              <span>Signatures</span>
+              <b>{stats.mailboxes ?? 0}</b>
+            </button>
+            <button className={view === "external" ? "settings-link active" : "settings-link"} type="button" onClick={() => onSettingsOpen("external")}>
+              <Mail size={16} />
+              <span>External</span>
+              <b>{stats.external_accounts ?? 0}</b>
+            </button>
+            <button className={view === "logs" ? "settings-link active" : "settings-link"} type="button" onClick={() => onSettingsOpen("logs")}>
+              <TerminalSquare size={16} />
+              <span>Logs</span>
+              <b>{stats.audit_logs ?? 0}</b>
+            </button>
+            <button className={view === "index-engine" ? "settings-link active" : "settings-link"} type="button" onClick={() => onSettingsOpen("index-engine")}>
+              <FileText size={16} />
+              <span>Index Engine</span>
+              <b>OCR</b>
+            </button>
+            <button
+              className={view === "other-settings" ? "settings-link active" : "settings-link"}
+              type="button"
+              onClick={() => onSettingsOpen("other-settings")}
+            >
+              <SlidersHorizontal size={16} />
+              <span>Other Settings</span>
+              <b>{refreshIntervalSeconds > 0 ? `${refreshIntervalSeconds}s` : "Off"}</b>
+            </button>
+          </div>
+        ) : null}
       </div>
 
       <button className="button ghost wide lock-button" type="button" onClick={onLock}>
@@ -3637,6 +3691,7 @@ function IndexEngineView({
   const [payload, setPayload] = useState<BucketIndexPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [runningNow, setRunningNow] = useState(false);
 
   const loadStatus = useCallback(
     async (silent = false) => {
@@ -3667,11 +3722,10 @@ function IndexEngineView({
 
     const poll = async () => {
       try {
-        await api.runBucketIndex().catch(() => undefined);
         const next = await api.bucketIndexStatus();
         if (!cancelled) setPayload(next);
       } catch (error) {
-        if (!cancelled) onNotice(`Index Engine poll failed: ${readError(error)}`);
+        if (!cancelled) onNotice(`Index Engine status failed: ${readError(error)}`);
       }
     };
 
@@ -3694,6 +3748,20 @@ function IndexEngineView({
       onNotice(`Index Engine could not start: ${readError(error)}`);
     } finally {
       setStarting(false);
+    }
+  }
+
+  async function continueIndex() {
+    if (!api) return;
+    setRunningNow(true);
+    try {
+      const next = await api.runBucketIndex();
+      setPayload(next);
+      onNotice("Index Engine runner requested. Status will update automatically.");
+    } catch (error) {
+      onNotice(`Index Engine runner failed: ${readError(error)}`);
+    } finally {
+      setRunningNow(false);
     }
   }
 
@@ -3733,6 +3801,10 @@ function IndexEngineView({
             <button className="button primary" type="button" disabled={!api || starting || active || configuredBuckets.length === 0} onClick={() => void startIndex()}>
               {starting || active ? <Loader2 className="spin-icon" size={15} /> : <Search size={15} />}
               {active ? "Indexing" : "Index all buckets"}
+            </button>
+            <button className="button ghost" type="button" disabled={!api || runningNow || configuredBuckets.length === 0} onClick={() => void continueIndex()}>
+              {runningNow ? <Loader2 className="spin-icon" size={15} /> : <RefreshCw size={15} />}
+              Continue now
             </button>
             <button className="button ghost" type="button" disabled={!api || loading} onClick={() => void loadStatus()}>
               {loading ? <Loader2 className="spin-icon" size={15} /> : <RefreshCw size={15} />}
@@ -3845,6 +3917,112 @@ function bucketIndexTone(job: BucketIndexJobRow | null): "ok" | "warn" | "error"
   if (job.status === "complete") return "ok";
   if (job.status === "failed") return "error";
   return "warn";
+}
+
+function NotesView({
+  api,
+  buckets,
+  activeBucketId,
+  onBucketChange,
+  onNotice
+}: {
+  api: ApiClient | null;
+  buckets: BucketRow[];
+  activeBucketId: string | null;
+  onBucketChange: (bucketId: string | null) => void;
+  onNotice: (message: string | null) => void;
+}) {
+  const writableBuckets = buckets.filter((bucket) => bucket.configured && bucket.writable);
+  const activeBucket =
+    writableBuckets.find((bucket) => bucket.id === activeBucketId) ?? writableBuckets[0] ?? buckets.find((bucket) => bucket.id === activeBucketId) ?? null;
+  const [folderPath, setFolderPath] = useState("notes");
+  const [filename, setFilename] = useState(() => `note-${new Date().toISOString().slice(0, 10)}.txt`);
+  const [content, setContent] = useState("");
+  const [saving, setSaving] = useState(false);
+  const bucketOptions = bucketOptionsForSelect(buckets);
+  const normalizedPrefix = normalizeNotesPrefix(folderPath);
+  const normalizedFilename = normalizeNoteFilename(filename);
+  const objectKey = buildR2UploadKey(normalizedPrefix, normalizedFilename);
+  const canSave = Boolean(api && activeBucket?.writable && normalizedFilename && content.trim());
+
+  useEffect(() => {
+    if (activeBucket && activeBucket.id !== activeBucketId) {
+      onBucketChange(activeBucket.id);
+    }
+  }, [activeBucket, activeBucketId, onBucketChange]);
+
+  async function saveNote(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!api || !activeBucket) return;
+    if (!activeBucket.writable) {
+      onNotice("Selected bucket is not writable");
+      return;
+    }
+    if (!content.trim()) {
+      onNotice("Note content cannot be empty");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const file = new File([content], normalizedFilename, { type: "text/plain;charset=utf-8" });
+      await api.uploadBucketObject(activeBucket.id, objectKey, file);
+      onNotice(`Note saved to ${activeBucket.name}/${objectKey}`);
+      setContent("");
+      setFilename(`note-${new Date().toISOString().slice(0, 10)}.txt`);
+    } catch (error) {
+      onNotice(readError(error));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="settings-shell notes-shell">
+      <section className="settings-card notes-editor">
+        <header>
+          <div>
+            <span>New note</span>
+            <strong>{objectKey || "Choose a destination"}</strong>
+          </div>
+          <FileText size={18} />
+        </header>
+        <form className="notes-form" onSubmit={saveNote}>
+          <div className="notes-destination-grid">
+            <label>
+              Bucket
+              <CustomSelect
+                value={activeBucket?.id ?? ""}
+                onChange={(value) => onBucketChange(value || null)}
+                disabled={bucketOptions.length === 0}
+                options={bucketOptions}
+                title="Note bucket"
+              />
+            </label>
+            <label>
+              Folder
+              <input value={folderPath} onChange={(event) => setFolderPath(event.target.value)} placeholder="notes/project" />
+            </label>
+            <label>
+              File name
+              <input value={filename} onChange={(event) => setFilename(event.target.value)} placeholder="note.txt" />
+            </label>
+          </div>
+          <label className="notes-body-field">
+            Text
+            <textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="Write a note..." />
+          </label>
+          <div className="notes-save-row">
+            <span title={objectKey}>{activeBucket ? `${activeBucket.name}/${objectKey}` : "No writable bucket selected"}</span>
+            <button className="button primary" type="submit" disabled={!canSave || saving}>
+              {saving ? <Loader2 className="spin-icon" size={15} /> : <Save size={15} />}
+              {saving ? "Saving" : "Save note"}
+            </button>
+          </div>
+        </form>
+      </section>
+    </section>
+  );
 }
 
 function OtherSettingsView({
@@ -4438,6 +4616,8 @@ function BucketObjectPreview({
     blob: Blob | null;
   }>({ loading: false, downloading: false, error: null, kind: "download", url: null, text: null, blob: null });
   const [textIndex, setTextIndex] = useState<{ text: string; source: string; updatedAt: string } | null>(null);
+  const [previewExtracting, setPreviewExtracting] = useState(false);
+  const officePreview = object ? isOfficePreviewCandidate(object.name, object.contentType) : false;
 
   useEffect(() => {
     let active = true;
@@ -4504,6 +4684,24 @@ function BucketObjectPreview({
       active = false;
     };
   }, [api, bucket, object]);
+
+  async function generateTextPreview() {
+    if (!api || !bucket || !object) return;
+    setPreviewExtracting(true);
+    try {
+      const data = await api.generateBucketObjectTextPreview(bucket.id, object.key);
+      if (data.index) {
+        setTextIndex({ text: data.index.text, source: data.index.source, updatedAt: data.index.updated_at });
+        onNotice(`Preview generated from ${data.index.source}`);
+      } else {
+        onNotice("Preview could not be generated");
+      }
+    } catch (error) {
+      onNotice(readError(error));
+    } finally {
+      setPreviewExtracting(false);
+    }
+  }
 
   async function downloadObject() {
     if (!api || !bucket || !object) return;
@@ -4579,6 +4777,20 @@ function BucketObjectPreview({
           <img className="image-preview" src={state.url} alt={object.name} />
         ) : state.kind === "pdf" && state.url ? (
           <iframe className="pdf-preview" src={state.url} title={object.name} />
+        ) : officePreview ? (
+          textIndex ? (
+            <pre className="text-preview office-preview">{textIndex.text}</pre>
+          ) : (
+            <div className="preview-fallback">
+              <FileText size={28} />
+              <strong>{object.name}</strong>
+              <span>Generate a searchable text preview for Word, Excel, or PowerPoint files.</span>
+              <button className="button ghost" type="button" disabled={previewExtracting} onClick={() => void generateTextPreview()}>
+                {previewExtracting ? <Loader2 size={15} /> : <FileText size={15} />}
+                {previewExtracting ? "Generating preview" : "Generate preview"}
+              </button>
+            </div>
+          )
         ) : state.kind === "text" ? (
           <pre className="text-preview">{state.text}</pre>
         ) : (
@@ -5325,7 +5537,7 @@ function ComposeDialog({
   );
 }
 
-type AttachmentPreviewKind = "image" | "pdf" | "text" | "download";
+type AttachmentPreviewKind = "image" | "pdf" | "text" | "office" | "download";
 
 function AttachmentPreviewDialog({
   api,
@@ -5338,17 +5550,23 @@ function AttachmentPreviewDialog({
 }) {
   const [state, setState] = useState<{
     loading: boolean;
+    extracting: boolean;
     error: string | null;
     kind: AttachmentPreviewKind;
     url: string | null;
     text: string | null;
+    generatedText: string | null;
+    generatedSource: string | null;
     blob: Blob | null;
   }>({
     loading: true,
+    extracting: false,
     error: null,
     kind: "download",
     url: null,
     text: null,
+    generatedText: null,
+    generatedSource: null,
     blob: null
   });
 
@@ -5362,7 +5580,17 @@ function AttachmentPreviewDialog({
         return;
       }
 
-      setState({ loading: true, error: null, kind: "download", url: null, text: null, blob: null });
+      setState({
+        loading: true,
+        extracting: false,
+        error: null,
+        kind: "download",
+        url: null,
+        text: null,
+        generatedText: null,
+        generatedSource: null,
+        blob: null
+      });
 
       try {
         const blob = await api.downloadAttachment(attachment.id);
@@ -5371,11 +5599,21 @@ function AttachmentPreviewDialog({
         const text = kind === "text" ? await blob.text() : null;
 
         if (active) {
-          setState({ loading: false, error: null, kind, url: objectUrl, text, blob });
+          setState({ loading: false, extracting: false, error: null, kind, url: objectUrl, text, generatedText: null, generatedSource: null, blob });
         }
       } catch (error) {
         if (active) {
-          setState({ loading: false, error: readError(error), kind: "download", url: null, text: null, blob: null });
+          setState({
+            loading: false,
+            extracting: false,
+            error: readError(error),
+            kind: "download",
+            url: null,
+            text: null,
+            generatedText: null,
+            generatedSource: null,
+            blob: null
+          });
         }
       }
     }
@@ -5387,6 +5625,22 @@ function AttachmentPreviewDialog({
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [api, attachment]);
+
+  async function generateAttachmentPreview() {
+    if (!api) return;
+    setState((current) => ({ ...current, extracting: true, error: null }));
+    try {
+      const data = await api.generateAttachmentTextPreview(attachment.id);
+      setState((current) => ({
+        ...current,
+        extracting: false,
+        generatedText: data.preview.text,
+        generatedSource: data.preview.source
+      }));
+    } catch (error) {
+      setState((current) => ({ ...current, extracting: false, error: readError(error) }));
+    }
+  }
 
   return (
     <div className="modal-scrim preview-scrim" role="dialog" aria-modal="true">
@@ -5432,6 +5686,26 @@ function AttachmentPreviewDialog({
             <img className="image-preview" src={state.url} alt={attachment.filename} />
           ) : state.kind === "pdf" && state.url ? (
             <iframe className="pdf-preview" src={state.url} title={attachment.filename} />
+          ) : state.kind === "office" ? (
+            state.generatedText ? (
+              <div className="office-preview-stack">
+                <div className="bucket-index-note">
+                  <FileText size={14} />
+                  Preview generated from {state.generatedSource ?? "document extraction"}
+                </div>
+                <pre className="text-preview office-preview">{state.generatedText}</pre>
+              </div>
+            ) : (
+              <div className="preview-fallback">
+                <FileText size={28} />
+                <strong>{attachment.filename}</strong>
+                <span>Generate a readable text preview for this Office attachment.</span>
+                <button className="button ghost" type="button" disabled={state.extracting} onClick={() => void generateAttachmentPreview()}>
+                  {state.extracting ? <Loader2 size={15} /> : <FileText size={15} />}
+                  {state.extracting ? "Generating preview" : "Generate preview"}
+                </button>
+              </div>
+            )
           ) : state.kind === "text" ? (
             <pre className="text-preview">{state.text}</pre>
           ) : (
@@ -5794,6 +6068,7 @@ function detectObjectPreviewKind(filenameInput: string, contentTypeInput: string
 
   if (contentType.startsWith("image/")) return "image";
   if (contentType === "application/pdf" || filename.endsWith(".pdf")) return "pdf";
+  if (isOfficePreviewCandidate(filename, contentType)) return "office";
   if (blob.size <= 2 * 1024 * 1024 && (contentType.startsWith("text/") || textExtensions.some((ext) => filename.endsWith(ext)))) {
     return "text";
   }
@@ -5801,9 +6076,40 @@ function detectObjectPreviewKind(filenameInput: string, contentTypeInput: string
   return "download";
 }
 
+function isOfficePreviewCandidate(filenameInput: string, contentTypeInput: string): boolean {
+  const filename = filenameInput.toLowerCase();
+  const contentType = contentTypeInput.toLowerCase();
+  const officeExtensions = [".doc", ".docx", ".word", ".wordx", ".xls", ".xlsx", ".ppt", ".pptx", ".odt", ".ods", ".odp"];
+  return (
+    officeExtensions.some((extension) => filename.endsWith(extension)) ||
+    contentType.includes("officedocument") ||
+    contentType.includes("msword") ||
+    contentType.includes("ms-excel") ||
+    contentType.includes("ms-powerpoint") ||
+    contentType.includes("spreadsheet") ||
+    contentType.includes("presentation") ||
+    contentType.includes("opendocument")
+  );
+}
+
 function buildR2UploadKey(prefix: string, filename: string): string {
   const safeName = filename.replace(/[\\\u0000-\u001f\u007f]/g, "_").replace(/^\/+/, "").trim() || "upload";
   return `${prefix}${safeName}`.replace(/^\/+/, "");
+}
+
+function normalizeNotesPrefix(value: string): string {
+  const normalized = value
+    .replace(/\\/g, "/")
+    .split("/")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join("/");
+  return normalized ? `${normalized}/` : "";
+}
+
+function normalizeNoteFilename(value: string): string {
+  const normalized = value.replace(/[\\/\u0000-\u001f\u007f]/g, "_").trim() || `note-${new Date().toISOString().slice(0, 10)}.txt`;
+  return /\.[a-z0-9]{1,8}$/i.test(normalized) ? normalized : `${normalized}.txt`;
 }
 
 function prefixParts(prefix: string): { name: string; prefix: string }[] {

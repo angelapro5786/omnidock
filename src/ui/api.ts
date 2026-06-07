@@ -309,6 +309,10 @@ export class ApiClient {
     return response.blob();
   }
 
+  generateAttachmentTextPreview(id: string): Promise<{ ok: true; preview: { text: string; source: string } }> {
+    return this.request(`/api/attachments/${encodeURIComponent(id)}/text-preview`, { method: "POST" });
+  }
+
   listBucketObjects(bucketId: string, prefix: string, cursor?: string | null): Promise<BucketObjectsPayload> {
     const params = new URLSearchParams();
     if (prefix) params.set("prefix", prefix);
@@ -375,6 +379,13 @@ export class ApiClient {
 
   getBucketObjectTextIndex(bucketId: string, key: string): Promise<BucketTextIndexPayload> {
     return this.request<BucketTextIndexPayload>(`/api/buckets/${encodeURIComponent(bucketId)}/object-text?key=${encodeURIComponent(key)}`);
+  }
+
+  generateBucketObjectTextPreview(bucketId: string, key: string): Promise<BucketTextIndexPayload> {
+    return this.request<BucketTextIndexPayload>(
+      `/api/buckets/${encodeURIComponent(bucketId)}/object-text/generate?key=${encodeURIComponent(key)}`,
+      { method: "POST" }
+    );
   }
 
   saveBucketObjectTextIndex(bucketId: string, key: string, text: string, source = "manual"): Promise<BucketTextIndexPayload> {

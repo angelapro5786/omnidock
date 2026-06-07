@@ -522,6 +522,40 @@ export async function handleApi(
       return methodNotAllowed();
     }
 
+    const attachmentTextPreviewMatch = url.pathname.match(/^\/api\/attachments\/([^/]+)\/text-preview$/);
+    if (attachmentTextPreviewMatch) {
+      if (request.method !== "POST") return methodNotAllowed();
+      requireMailBucketBinding(env);
+      const attachment = await getAttachmentById(env, attachmentTextPreviewMatch[1]);
+      if (!attachment) {
+        throw new ApiError(404, "attachment_not_found", "Attachment not found");
+      }
+      const object = await env.MAIL_BUCKET.get(attachment.r2_key);
+      if (!object) {
+        throw new ApiError(404, "attachment_missing", "Attachment object is missing in R2");
+      }
+
+      const previewObject = objectWithPreviewContentType(object, attachment.filename, attachment.content_type);
+      const extraction = await extractBucketIndexText(
+        env,
+        { info: mailBucketInfo(env), bucket: env.MAIL_BUCKET },
+        previewObject,
+        Date.now() + BUCKET_INDEX_TEXT_DEADLINE_MS
+      );
+      if (extraction.status === "skipped") {
+        throw new ApiError(415, "attachment_preview_unavailable", `Preview unavailable: ${extraction.reason}`);
+      }
+
+      ctx.waitUntil(
+        recordAudit(env, "attachment.preview_generated", attachment.id, {
+          contentType: attachment.content_type,
+          filename: attachment.filename,
+          source: extraction.source
+        })
+      );
+      return json({ ok: true, preview: { text: extraction.text, source: extraction.source } });
+    }
+
     const attachmentMatch = url.pathname.match(/^\/api\/attachments\/([^/]+)$/);
     if (attachmentMatch) {
       if (request.method !== "GET") return methodNotAllowed();
@@ -556,7 +590,11 @@ export async function handleApi(
       }
       if (request.method === "POST") {
         await queueBucketIndexJob(env);
-        ctx.waitUntil(runBucketIndexJobs(env, { maxDurationMs: BUCKET_INDEX_HTTP_BACKGROUND_MS }));
+        ctx.waitUntil(
+          runBucketIndexJobs(env, { maxDurationMs: BUCKET_INDEX_HTTP_BACKGROUND_MS }).catch((error) =>
+            recordBucketIndexRunFailure(env, error)
+          )
+        );
         return json({ ok: true, ...(await bucketIndexStatus(env)) }, { status: 202 });
       }
       return methodNotAllowed();
@@ -564,8 +602,12 @@ export async function handleApi(
 
     if (url.pathname === "/api/bucket-index/run") {
       if (request.method !== "POST") return methodNotAllowed();
-      ctx.waitUntil(runBucketIndexJobs(env, { maxDurationMs: BUCKET_INDEX_HTTP_BACKGROUND_MS }));
-      return json({ ok: true, ...(await bucketIndexStatus(env)) });
+      ctx.waitUntil(
+        runBucketIndexJobs(env, { maxDurationMs: BUCKET_INDEX_HTTP_BACKGROUND_MS }).catch((error) =>
+          recordBucketIndexRunFailure(env, error)
+        )
+      );
+      return json({ ok: true, ...(await bucketIndexStatus(env)) }, { status: 202 });
     }
 
     if (url.pathname === "/api/buckets/search") {
@@ -699,6 +741,32 @@ export async function handleApi(
       }
 
       return methodNotAllowed();
+    }
+
+    const bucketObjectTextGenerateMatch = url.pathname.match(/^\/api\/buckets\/([^/]+)\/object-text\/generate$/);
+    if (bucketObjectTextGenerateMatch) {
+      if (request.method !== "POST") return methodNotAllowed();
+      const bucket = getBucketBinding(env, bucketObjectTextGenerateMatch[1]);
+      const key = readR2Key(url);
+      const object = await bucket.bucket.get(key);
+      if (!object) {
+        throw new ApiError(404, "bucket_object_not_found", "R2 object not found");
+      }
+
+      const extraction = await extractBucketIndexText(env, bucket, object, Date.now() + BUCKET_INDEX_TEXT_DEADLINE_MS);
+      if (extraction.status === "skipped") {
+        throw new ApiError(415, "bucket_object_preview_unavailable", `Preview unavailable: ${extraction.reason}`);
+      }
+
+      const index = await upsertBucketObjectTextIndex(env, bucket.info, object, extraction.text, extraction.source);
+      ctx.waitUntil(
+        recordAudit(env, "bucket.object_text_preview_generated", key, {
+          bucket: bucket.info.id,
+          ocr: extraction.ocr,
+          source: extraction.source
+        })
+      );
+      return json({ ok: true, index });
     }
 
     const bucketObjectTextMatch = url.pathname.match(/^\/api\/buckets\/([^/]+)\/object-text$/);
@@ -910,20 +978,22 @@ type BucketIndexExtraction =
   | { status: "indexed"; text: string; source: string; ocr: boolean }
   | { status: "skipped"; reason: string };
 
-function listAvailableBuckets(env: RuntimeEnv): BucketInfo[] {
+function mailBucketInfo(env: RuntimeEnv): BucketInfo {
   const configured = Boolean(env.MAIL_BUCKET);
+  return {
+    id: "mail",
+    name: runtimeBucketName(env),
+    binding: "MAIL_BUCKET",
+    configured,
+    writable: configured,
+    description: "OmniDock raw messages, attachments, and manual files"
+  };
+}
+
+function listAvailableBuckets(env: RuntimeEnv): BucketInfo[] {
   const displayNames = parseExtraR2Buckets(env.EXTRA_R2_BUCKETS);
   const extraBindings = new Set<string>([...displayNames.keys(), ...discoverR2BindingNames(env)]);
-  const buckets: BucketInfo[] = [
-    {
-      id: "mail",
-      name: runtimeBucketName(env),
-      binding: "MAIL_BUCKET",
-      configured,
-      writable: configured,
-      description: "OmniDock raw messages, attachments, and manual files"
-    }
-  ];
+  const buckets: BucketInfo[] = [mailBucketInfo(env)];
 
   for (const binding of [...extraBindings].sort((left, right) => left.localeCompare(right))) {
     if (binding === "MAIL_BUCKET" || reservedBucketDiscoveryBindings.has(binding)) continue;
@@ -1073,6 +1143,37 @@ async function requeueExpiredBucketIndexJob(env: RuntimeEnv): Promise<void> {
     .run();
 }
 
+function bucketIndexLeaseActive(job: BucketIndexJobRow | null): boolean {
+  if (!job?.lease_until) return false;
+  const leaseMs = Date.parse(job.lease_until);
+  return Number.isFinite(leaseMs) && leaseMs > Date.now();
+}
+
+export async function recordBucketIndexRunFailure(env: RuntimeEnv, error: unknown): Promise<void> {
+  if (!env.DB) return;
+  const message = error instanceof Error ? error.message : "Bucket index run failed";
+  console.error("Failed to run bucket index jobs", error);
+  try {
+    await ensureDatabaseSchema(env);
+    await env.DB.prepare(
+      `UPDATE bucket_index_jobs
+       SET status = 'failed',
+           message = 'Bucket index failed',
+           last_error = ?,
+           lease_until = NULL,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`
+    )
+      .bind(message.slice(0, 500), BUCKET_INDEX_JOB_ID)
+      .run();
+    await recordAudit(env, "bucket.index_failed", BUCKET_INDEX_JOB_ID, {
+      error: message.slice(0, 500)
+    });
+  } catch (auditError) {
+    console.error("Failed to record bucket index failure", auditError);
+  }
+}
+
 export async function runBucketIndexJobs(
   env: RuntimeEnv,
   options: { maxDurationMs?: number } = {}
@@ -1090,6 +1191,9 @@ export async function runBucketIndexJobs(
 
   let job = await getBucketIndexJob(env);
   if (!job || job.status === "complete" || job.status === "failed") {
+    return { job };
+  }
+  if (bucketIndexLeaseActive(job)) {
     return { job };
   }
   if (buckets.length === 0) {
@@ -1731,10 +1835,17 @@ function isAiMarkdownCandidate(object: R2Object): boolean {
     ".gif",
     ".bmp",
     ".svg",
+    ".doc",
     ".docx",
+    ".word",
+    ".wordx",
+    ".ppt",
     ".pptx",
-    ".xlsx",
     ".xls",
+    ".xlsx",
+    ".odt",
+    ".ods",
+    ".odp",
     ".csv",
     ".html"
   ];
@@ -1746,6 +1857,9 @@ function isAiMarkdownCandidate(object: R2Object): boolean {
       contentType.includes("spreadsheet") ||
       contentType.includes("presentation") ||
       contentType.includes("msword") ||
+      contentType.includes("ms-excel") ||
+      contentType.includes("ms-powerpoint") ||
+      contentType.includes("opendocument") ||
       markdownExtensions.some((extension) => filename.endsWith(extension)))
   );
 }
@@ -1758,12 +1872,49 @@ function contentTypeForIndexObject(object: R2Object): string {
   if (filename.endsWith(".webp")) return "image/webp";
   if (filename.endsWith(".gif")) return "image/gif";
   if (filename.endsWith(".svg")) return "image/svg+xml";
+  if (filename.endsWith(".doc")) return "application/msword";
+  if (filename.endsWith(".word")) return "application/msword";
   if (filename.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  if (filename.endsWith(".wordx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  if (filename.endsWith(".ppt")) return "application/vnd.ms-powerpoint";
   if (filename.endsWith(".pptx")) return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+  if (filename.endsWith(".xls")) return "application/vnd.ms-excel";
   if (filename.endsWith(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  if (filename.endsWith(".odt")) return "application/vnd.oasis.opendocument.text";
+  if (filename.endsWith(".ods")) return "application/vnd.oasis.opendocument.spreadsheet";
+  if (filename.endsWith(".odp")) return "application/vnd.oasis.opendocument.presentation";
   if (filename.endsWith(".csv")) return "text/csv";
   if (filename.endsWith(".html")) return "text/html";
   return object.httpMetadata?.contentType || "application/octet-stream";
+}
+
+function objectWithPreviewContentType(object: R2Object, filename: string, storedContentType: string | null): R2Object {
+  const contentType = contentTypeForPreviewFilename(filename, storedContentType ?? object.httpMetadata?.contentType ?? null);
+  if (!contentType || contentType === object.httpMetadata?.contentType) return object;
+  return {
+    ...object,
+    httpMetadata: {
+      ...(object.httpMetadata ?? {}),
+      contentType
+    },
+    writeHttpMetadata: object.writeHttpMetadata.bind(object)
+  };
+}
+
+function contentTypeForPreviewFilename(filenameInput: string, currentContentType: string | null): string | null {
+  const current = currentContentType?.trim();
+  if (current && current.toLowerCase() !== "application/octet-stream") return current;
+  const filename = filenameInput.toLowerCase();
+  if (filename.endsWith(".doc") || filename.endsWith(".word")) return "application/msword";
+  if (filename.endsWith(".docx") || filename.endsWith(".wordx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  if (filename.endsWith(".ppt")) return "application/vnd.ms-powerpoint";
+  if (filename.endsWith(".pptx")) return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+  if (filename.endsWith(".xls")) return "application/vnd.ms-excel";
+  if (filename.endsWith(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  if (filename.endsWith(".odt")) return "application/vnd.oasis.opendocument.text";
+  if (filename.endsWith(".ods")) return "application/vnd.oasis.opendocument.spreadsheet";
+  if (filename.endsWith(".odp")) return "application/vnd.oasis.opendocument.presentation";
+  return current || null;
 }
 
 function snippetForNormalizedText(text: string, normalizedQuery: string): string | null {

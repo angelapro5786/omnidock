@@ -1,4 +1,4 @@
-import { BUCKET_INDEX_MAX_RUN_MS, handleApi, runBucketIndexJobs } from "./api";
+import { BUCKET_INDEX_MAX_RUN_MS, handleApi, recordBucketIndexRunFailure, runBucketIndexJobs } from "./api";
 import { receiveEmail } from "./email";
 import { EXTERNAL_SYNC_MAX_RUN_MS, runExternalSyncJobs } from "./external-sync";
 import { RuntimeEnv, json, withSecurityHeaders } from "./http";
@@ -44,9 +44,7 @@ export default {
       })
     );
     ctx.waitUntil(
-      runBucketIndexJobs(runtimeEnv, { maxDurationMs: BUCKET_INDEX_MAX_RUN_MS }).catch((error) => {
-        console.error("Failed to run bucket index jobs", error);
-      })
+      runBucketIndexJobs(runtimeEnv, { maxDurationMs: BUCKET_INDEX_MAX_RUN_MS }).catch((error) => recordBucketIndexRunFailure(runtimeEnv, error))
     );
   }
 } satisfies ExportedHandler<Env>;

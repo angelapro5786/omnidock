@@ -679,21 +679,28 @@ function buildMimeMessage(input: {
 }): string {
   const mixedBoundary = `omnidock-mixed-${crypto.randomUUID()}`;
   const alternativeBoundary = `omnidock-alt-${crypto.randomUUID()}`;
-  const lines = [
+  const headers = [
     `From: ${formatAddress(input.from, input.fromName)}`,
     `To: ${input.to.map((address) => formatAddress(address)).join(", ")}`,
-    input.cc.length > 0 ? `Cc: ${input.cc.map((address) => formatAddress(address)).join(", ")}` : "",
     `Subject: ${encodeHeader(input.subject)}`,
     "MIME-Version: 1.0",
     `Date: ${new Date().toUTCString()}`,
     ...Object.entries(input.headers).map(([key, value]) => `${key}: ${sanitizeHeaderValue(value)}`),
     input.attachments.length > 0
       ? `Content-Type: multipart/mixed; boundary="${mixedBoundary}"`
-      : `Content-Type: multipart/alternative; boundary="${alternativeBoundary}"`,
+      : `Content-Type: multipart/alternative; boundary="${alternativeBoundary}"`
+  ];
+
+  if (input.cc.length > 0) {
+    headers.splice(2, 0, `Cc: ${input.cc.map((address) => formatAddress(address)).join(", ")}`);
+  }
+
+  const lines = [
+    ...headers,
     "",
-    input.attachments.length > 0 ? `--${mixedBoundary}` : "",
-    input.attachments.length > 0 ? `Content-Type: multipart/alternative; boundary="${alternativeBoundary}"` : "",
-    input.attachments.length > 0 ? "" : "",
+    ...(input.attachments.length > 0
+      ? [`--${mixedBoundary}`, `Content-Type: multipart/alternative; boundary="${alternativeBoundary}"`, ""]
+      : []),
     `--${alternativeBoundary}`,
     'Content-Type: text/plain; charset="UTF-8"',
     "Content-Transfer-Encoding: base64",
@@ -705,7 +712,7 @@ function buildMimeMessage(input: {
     "",
     wrapBase64(base64Utf8(input.html || textToHtml(input.text))),
     `--${alternativeBoundary}--`
-  ].filter((line, index, all) => line !== "" || all[index - 1] !== "");
+  ];
 
   for (const attachment of input.attachments) {
     lines.push(
@@ -722,7 +729,7 @@ function buildMimeMessage(input: {
     lines.push(`--${mixedBoundary}--`);
   }
 
-  return lines.filter((line) => line !== undefined).join("\r\n");
+  return lines.join("\r\n");
 }
 
 function formatAddress(email: string, name?: string | null): string {
