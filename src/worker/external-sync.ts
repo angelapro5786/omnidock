@@ -411,11 +411,13 @@ async function runExternalSyncJob(
     await markExternalAccountChecked(env, account.id, "configured");
 
     const nextStatus: ExternalSyncJobStatus = result.complete ? "complete" : "queued";
+    const nextImported = latest.imported + result.imported;
+    const nextSkipped = latest.skipped + result.skipped;
     const message = result.complete
-      ? `Done: ${latest.imported + result.imported} imported, ${latest.skipped + result.skipped} skipped`
+      ? `Done: ${nextImported} new, ${nextSkipped} already saved`
       : result.timedOut
         ? "15 minute sync window reached. Run Sync again to continue remaining mail."
-        : `Still pulling: ${latest.imported + result.imported} imported, ${latest.skipped + result.skipped} skipped`;
+        : `Still pulling: ${nextImported} new, ${nextSkipped} already saved`;
 
     await env.DB.prepare(
       `UPDATE external_sync_jobs

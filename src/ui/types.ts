@@ -193,6 +193,16 @@ export type BootstrapPayload = {
   threads: ThreadRow[];
 };
 
+export type ThreadListPayload = {
+  ok: true;
+  threads: ThreadRow[];
+  stats: Record<string, number>;
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+};
+
 export type BucketObjectsPayload = {
   ok: true;
   bucket: BucketRow;

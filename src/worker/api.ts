@@ -169,7 +169,7 @@ export async function handleApi(
 
     if (url.pathname === "/api/bootstrap") {
       if (request.method !== "GET") return methodNotAllowed();
-      const [domains, mailboxes, contacts, signatures, externalAccounts, stats, threads] = await Promise.all([
+      const [domains, mailboxes, contacts, signatures, externalAccounts, stats, threadList] = await Promise.all([
         listDomains(env),
         listMailboxes(env),
         listContacts(env),
@@ -188,7 +188,7 @@ export async function handleApi(
         externalAccounts,
         buckets: listAvailableBuckets(env),
         stats,
-        threads
+        threads: threadList.threads
       });
     }
 
@@ -439,11 +439,13 @@ export async function handleApi(
       const domainId = url.searchParams.get("domainId");
       const mailboxId = url.searchParams.get("mailboxId");
       const query = url.searchParams.get("q");
-      const [threads, stats] = await Promise.all([
-        listThreads(env, { folder, domainId, mailboxId, query }),
+      const limit = optionalIntegerParam(url, "limit", 80, { min: 1, max: 200 });
+      const offset = optionalIntegerParam(url, "offset", 0, { min: 0, max: 100000 });
+      const [threadList, stats] = await Promise.all([
+        listThreads(env, { folder, domainId, mailboxId, query, limit, offset }),
         getMailboxStats(env, mailboxId)
       ]);
-      return json({ ok: true, threads, stats });
+      return json({ ok: true, ...threadList, stats });
     }
 
     const threadMatch = url.pathname.match(/^\/api\/threads\/([^/]+)$/);
@@ -1808,6 +1810,19 @@ function readExternalAccountInput(body: Record<string, unknown>): {
 
 function isCredentialSecretReference(value: string): boolean {
   return /^[A-Z_][A-Z0-9_]*$/i.test(value) || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function optionalIntegerParam(
+  url: URL,
+  field: string,
+  fallback: number,
+  options: { min: number; max: number }
+): number {
+  const raw = url.searchParams.get(field);
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(options.max, Math.max(options.min, parsed));
 }
 
 function publicOrigin(request: Request, env: RuntimeEnv): string {

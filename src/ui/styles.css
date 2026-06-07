@@ -1442,18 +1442,20 @@ button:hover:not(:disabled) {
 }
 
 .bucket-row.object {
-  grid-template-rows: auto auto auto;
-  min-height: 48px;
+  grid-template-rows: 18px 15px;
+  min-height: 52px;
+  max-height: 52px;
+  overflow: hidden;
   padding: 6px 9px;
 }
 
 .bucket-row.object small {
-  overflow: visible;
+  min-width: 0;
+  overflow: hidden;
   color: var(--muted);
-  line-height: 1.35;
-  overflow-wrap: anywhere;
-  text-overflow: clip;
-  white-space: normal;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .bucket-row.object:hover {
@@ -1465,15 +1467,6 @@ button:hover:not(:disabled) {
 .bucket-row.object:hover b,
 .bucket-row.object:hover small {
   color: var(--muted);
-}
-
-.bucket-row.object em {
-  grid-column: 2 / -1;
-  overflow: hidden;
-  color: var(--text);
-  font: 11px/1.35 var(--mono);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .bucket-row.object.active:hover {
@@ -1545,10 +1538,13 @@ button:hover:not(:disabled) {
 
 .bucket-upload-entry {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) auto;
+  grid-template-columns: 18px minmax(0, 1fr) max-content;
+  grid-template-rows: 17px 14px;
   align-items: center;
   gap: 8px;
-  min-height: 34px;
+  min-height: 40px;
+  max-height: 42px;
+  overflow: hidden;
   padding: 6px 8px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -1556,6 +1552,8 @@ button:hover:not(:disabled) {
 }
 
 .bucket-upload-entry svg {
+  grid-row: 1 / span 2;
+  align-self: center;
   color: var(--muted);
 }
 
@@ -1577,11 +1575,26 @@ button:hover:not(:disabled) {
   display: grid;
   gap: 2px;
   min-width: 0;
+  overflow: hidden;
 }
 
 .bucket-upload-entry strong,
 .bucket-upload-entry span {
+  display: block;
+  min-width: 0;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bucket-upload-entry small {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  align-self: center;
+  justify-self: end;
+  max-width: 150px;
+  overflow: hidden;
+  text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2328,6 +2341,11 @@ button:hover:not(:disabled) {
   line-height: 1.35;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+}
+
+.thread-load-more {
+  margin: 8px;
+  width: calc(100% - 16px);
 }
 
 .thread-detail {

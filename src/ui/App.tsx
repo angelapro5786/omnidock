@@ -81,6 +81,7 @@ const DEFAULT_MAILBOX_KEY = "omnidock.defaultMailbox";
 const REFRESH_INTERVAL_KEY = "omnidock.refreshIntervalSeconds";
 const DEFAULT_REFRESH_INTERVAL_SECONDS = 10;
 const EXTERNAL_MAILBOX_SCOPE_PREFIX = "external:";
+const THREAD_PAGE_SIZE = 80;
 const EXTERNAL_SYNC_POLL_INTERVAL_MS = 2500;
 const EXTERNAL_SYNC_UI_MAX_WAIT_MS = 15 * 60 * 1000;
 
@@ -373,6 +374,9 @@ function AppContent() {
   const [folderStats, setFolderStats] = useState<Record<string, number>>({});
   const [query, setQuery] = useState("");
   const [threads, setThreads] = useState<ThreadRow[]>([]);
+  const [threadTotal, setThreadTotal] = useState(0);
+  const [threadHasMore, setThreadHasMore] = useState(false);
+  const [threadLoadingMore, setThreadLoadingMore] = useState(false);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [thread, setThread] = useState<ThreadPayload | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -405,6 +409,9 @@ function AppContent() {
   const clearPrivateState = useCallback(() => {
     setBootstrap(null);
     setThreads([]);
+    setThreadTotal(0);
+    setThreadHasMore(false);
+    setThreadLoadingMore(false);
     setActiveThreadId(null);
     setThread(null);
     setSelectedDomainId(null);
@@ -449,6 +456,8 @@ function AppContent() {
       sessionStorage.setItem(PASSWORD_KEY, password);
       setBootstrap(data);
       setThreads(hasMailboxScopes ? [] : data.threads);
+      setThreadTotal(hasMailboxScopes ? 0 : data.threads.length);
+      setThreadHasMore(false);
       setFolderStats(data.stats);
       setSelectedDomainId((current) =>
         current && data.domains.some((domain) => domain.id === current)
@@ -501,13 +510,30 @@ function AppContent() {
     }
   }, [loadSetupStatus, password]);
 
-  const loadThreads = useCallback(async (options: { preserveSelection?: boolean } = {}) => {
+  const loadThreads = useCallback(async (options: { preserveSelection?: boolean; clearSelection?: boolean; append?: boolean; offset?: number } = {}) => {
     if (!api) return;
+    const append = Boolean(options.append);
+    if (append) setThreadLoadingMore(true);
     try {
-      const data = await api.threads(folder, selectedMailboxId, query);
-      setThreads(data.threads);
+      const data = await api.threads(folder, selectedMailboxId, query, {
+        limit: THREAD_PAGE_SIZE,
+        offset: options.offset ?? 0
+      });
+      setThreads((current) => {
+        if (!append) return data.threads;
+        const seen = new Set(current.map((item) => item.thread_id));
+        return [...current, ...data.threads.filter((item) => !seen.has(item.thread_id))];
+      });
+      setThreadTotal(data.total);
+      setThreadHasMore(data.hasMore);
       setFolderStats(data.stats);
       setActiveThreadId((current) => {
+        if (append) {
+          return current;
+        }
+        if (options.clearSelection) {
+          return null;
+        }
         if (options.preserveSelection && current && data.threads.some((item) => item.thread_id === current)) {
           return current;
         }
@@ -515,6 +541,8 @@ function AppContent() {
       });
     } catch (error) {
       setNotice(readError(error));
+    } finally {
+      if (append) setThreadLoadingMore(false);
     }
   }, [api, folder, query, selectedMailboxId]);
 
@@ -563,7 +591,7 @@ function AppContent() {
         await loadBootstrap();
         await loadThreads({ preserveSelection: true });
         const moreText = result.timedOut ? " More mail remains; run Sync again to continue from the saved cursor." : "";
-        setNotice(`External mail synced: ${result.imported} imported, ${result.skipped} skipped.${moreText}`);
+        setNotice(`External mail synced: ${formatExternalSyncSummary(result)}.${moreText}`);
       })
       .catch((error) => {
         if (!cancelled) setSyncLog(`External sync status failed: ${readError(error)}`);
@@ -591,8 +619,8 @@ function AppContent() {
         await loadBootstrap();
         await loadThreads({ preserveSelection: true });
         const moreText = result.timedOut ? " More mail remains; run Sync again to continue from the saved cursor." : "";
-        setSyncLog(`${selectedExternalAccount.email}: ${result.imported} imported, ${result.skipped} skipped`);
-        setNotice(`External mail synced: ${result.imported} imported, ${result.skipped} skipped.${moreText}`);
+        setSyncLog(`${selectedExternalAccount.email}: ${formatExternalSyncSummary(result)}`);
+        setNotice(`External mail synced: ${formatExternalSyncSummary(result)}.${moreText}`);
       })
       .catch((error) => {
         const message = readError(error);
@@ -827,6 +855,8 @@ function AppContent() {
   const changeMailboxScope = (mailboxId: string | null) => {
     setSelectedMailboxId(mailboxId);
     setThreads([]);
+    setThreadTotal(0);
+    setThreadHasMore(false);
     setActiveThreadId(null);
     setThread(null);
   };
@@ -850,8 +880,13 @@ function AppContent() {
   };
 
   async function handleThreadAction(action: "archive" | "unarchive" | "delete") {
-    await loadBootstrap();
-    await loadThreads();
+    if (action === "delete") {
+      setActiveThreadId(null);
+      setThread(null);
+      await loadThreads({ clearSelection: true });
+    } else {
+      await loadThreads({ preserveSelection: true });
+    }
     setNotice(action === "archive" ? "Thread archived" : action === "delete" ? "Thread deleted" : "Thread restored");
   }
 
@@ -904,10 +939,10 @@ function AppContent() {
       const totals = summarizeExternalSyncJobs(finalJobs.jobs.filter((job) => inboundAccountIds.has(job.account_id)));
       if (errors.length > 0) {
         setNotice(`Sync finished with ${errors.length} warning${errors.length === 1 ? "" : "s"}: ${errors.join(" | ")}`);
-        setSyncLog(`Sync finished: ${totals.imported} imported, ${totals.skipped} skipped, ${errors.length} warning${errors.length === 1 ? "" : "s"}`);
+        setSyncLog(`Sync finished: ${formatExternalSyncSummary(totals)}, ${errors.length} warning${errors.length === 1 ? "" : "s"}`);
       } else {
-        setNotice(`Sync complete: ${totals.imported} imported, ${totals.skipped} skipped`);
-        setSyncLog(`Sync complete: ${totals.imported} imported, ${totals.skipped} skipped`);
+        setNotice(`Sync complete: ${formatExternalSyncSummary(totals)}`);
+        setSyncLog(`Sync complete: ${formatExternalSyncSummary(totals)}`);
       }
     } catch (error) {
       const message = readError(error);
@@ -939,6 +974,11 @@ function AppContent() {
         onFolderChange={(nextFolder) => {
           setFolder(nextFolder);
           setView("mail");
+          setThreads([]);
+          setThreadTotal(0);
+          setThreadHasMore(false);
+          setActiveThreadId(null);
+          setThread(null);
         }}
         onSettingsOpen={setView}
         onLock={lock}
@@ -995,11 +1035,11 @@ function AppContent() {
           )}
           <div className="topbar-actions">
             <PaletteChooser value={palette} onChange={setPalette} />
-            <button className="button" onClick={() => void syncEverything()} disabled={busy} title="Sync Cloudflare and pull external mail">
+            <button className="button" type="button" onClick={() => void syncEverything()} disabled={busy} title="Sync Cloudflare and pull external mail">
               {busy ? <Loader2 className="spin-icon" size={16} /> : <ShieldCheck size={16} />}
               Sync
             </button>
-            <button className="button primary" onClick={() => setComposeOpen(true)}>
+            <button className="button primary" type="button" onClick={() => setComposeOpen(true)}>
               <Plus size={16} />
               Compose
             </button>
@@ -1010,7 +1050,7 @@ function AppContent() {
           <div className="notice">
             <AlertTriangle size={16} />
             <span>{notice}</span>
-            <button className="icon-button" onClick={() => setNotice(null)} title="Dismiss">
+            <button className="icon-button" type="button" onClick={() => setNotice(null)} title="Dismiss">
               <X size={14} />
             </button>
           </div>
@@ -1062,10 +1102,14 @@ function AppContent() {
           <section className="main-grid">
             <ThreadList
               threads={threads}
+              total={threadTotal}
+              hasMore={threadHasMore}
+              loadingMore={threadLoadingMore}
               activeThreadId={activeThreadId}
               folder={folder}
               activeMailboxLabel={activeMailboxLabel}
               onSelect={(threadId) => setActiveThreadId(threadId)}
+              onLoadMore={() => void loadThreads({ append: true, preserveSelection: true, offset: threads.length })}
             />
             <ThreadDetail
               api={api}
@@ -1999,6 +2043,7 @@ function Sidebar({
             <button
               key={item.key}
               className={folder === item.key ? "nav-item active" : "nav-item"}
+              type="button"
               onClick={() => onFolderChange(item.key)}
             >
               <Icon size={16} />
@@ -2031,33 +2076,34 @@ function Sidebar({
           <Settings size={14} />
           Settings
         </div>
-        <button className={view === "rules" ? "settings-link active" : "settings-link"} onClick={() => onSettingsOpen("rules")}>
+        <button className={view === "rules" ? "settings-link active" : "settings-link"} type="button" onClick={() => onSettingsOpen("rules")}>
           <FolderGit2 size={16} />
           <span>Rules</span>
           <b>{stats.mailboxes ?? 0}</b>
         </button>
-        <button className={view === "contacts" ? "settings-link active" : "settings-link"} onClick={() => onSettingsOpen("contacts")}>
+        <button className={view === "contacts" ? "settings-link active" : "settings-link"} type="button" onClick={() => onSettingsOpen("contacts")}>
           <Users size={16} />
           <span>Contacts</span>
           <b>{stats.contacts ?? 0}</b>
         </button>
-        <button className={view === "signatures" ? "settings-link active" : "settings-link"} onClick={() => onSettingsOpen("signatures")}>
+        <button className={view === "signatures" ? "settings-link active" : "settings-link"} type="button" onClick={() => onSettingsOpen("signatures")}>
           <PenLine size={16} />
           <span>Signatures</span>
           <b>{stats.mailboxes ?? 0}</b>
         </button>
-        <button className={view === "external" ? "settings-link active" : "settings-link"} onClick={() => onSettingsOpen("external")}>
+        <button className={view === "external" ? "settings-link active" : "settings-link"} type="button" onClick={() => onSettingsOpen("external")}>
           <Mail size={16} />
           <span>External</span>
           <b>{stats.external_accounts ?? 0}</b>
         </button>
-        <button className={view === "logs" ? "settings-link active" : "settings-link"} onClick={() => onSettingsOpen("logs")}>
+        <button className={view === "logs" ? "settings-link active" : "settings-link"} type="button" onClick={() => onSettingsOpen("logs")}>
           <TerminalSquare size={16} />
           <span>Logs</span>
           <b>{stats.audit_logs ?? 0}</b>
         </button>
         <button
           className={view === "other-settings" ? "settings-link active" : "settings-link"}
+          type="button"
           onClick={() => onSettingsOpen("other-settings")}
         >
           <SlidersHorizontal size={16} />
@@ -2066,7 +2112,7 @@ function Sidebar({
         </button>
       </div>
 
-      <button className="button ghost wide lock-button" onClick={onLock}>
+      <button className="button ghost wide lock-button" type="button" onClick={onLock}>
         Lock
       </button>
     </aside>
@@ -2191,6 +2237,7 @@ function RulesView({
               <button
                 key={domain.id}
                 className={selectedDomain?.id === domain.id ? "domain-chip active" : "domain-chip"}
+                type="button"
                 onClick={() => onDomainChange(domain.id)}
               >
                 <Server size={14} />
@@ -2867,7 +2914,7 @@ function ExternalAccountsView({
         const sync = await pollExternalSyncJobs(api, [result.account], (message) => onNotice(`${result.account.email}: ${message}`));
         await onChange();
         const moreText = sync.timedOut ? " More mail remains; run Sync again to continue from the saved cursor." : "";
-        onNotice(`External mail synced: ${sync.imported} imported, ${sync.skipped} skipped.${moreText}`);
+        onNotice(`External mail synced: ${formatExternalSyncSummary(sync)}.${moreText}`);
       } else {
         onNotice("External account saved");
       }
@@ -3208,6 +3255,10 @@ function summarizeExternalSyncJobs(jobs: ExternalSyncJobRow[]): { imported: numb
   );
 }
 
+function formatExternalSyncSummary(summary: { imported: number; skipped: number; checked: number }): string {
+  return `${summary.imported} new, ${summary.skipped} already saved, ${summary.checked} checked`;
+}
+
 function formatExternalSyncProgress(
   jobs: ExternalSyncJobRow[],
   accountNames: Map<string, string>,
@@ -3223,7 +3274,7 @@ function formatExternalSyncProgress(
       ? `${summary.failed} external inbox failed`
       : "External inbox pull complete";
   const queuedText = queued > 0 ? `, ${queued} queued` : "";
-  return `${state}${queuedText} | ${summary.imported} imported, ${summary.skipped} skipped, ${summary.checked} checked`;
+  return `${state}${queuedText} | ${formatExternalSyncSummary(summary)}`;
 }
 
 function isActiveExternalSyncJob(job: ExternalSyncJobRow): boolean {
@@ -3966,13 +4017,13 @@ function BucketsView({
                 onClick={() => setSelectedKey(bucketObjectSelectionId(object))}
               >
                 <FileText size={14} />
-                <span>{object.name}</span>
+                <span title={object.name}>{object.name}</span>
                 <b>{formatBytes(object.size)}</b>
-                <small>
+                <small title={[object.bucketName, object.key, object.snippet].filter(Boolean).join(" · ")}>
                   {object.bucketName ? `${object.bucketName} · ` : ""}
                   {object.key}
+                  {object.snippet ? ` · ${object.snippet}` : ""}
                 </small>
-                {object.snippet ? <em>{object.snippet}</em> : null}
               </button>
             ))}
             {!loading && !searching && displayedObjects.length === 0 ? <div className="empty-state">{searchResults ? "No results" : "No objects"}</div> : null}
@@ -4044,10 +4095,10 @@ function BucketUploadLog({ state }: { state: BucketUploadState }) {
               <Circle size={14} />
             )}
             <div>
-              <strong>{entry.name}</strong>
-              <span>{entry.key}</span>
+              <strong title={entry.name}>{entry.name}</strong>
+              <span title={entry.key}>{entry.key}</span>
             </div>
-            <small>{entry.message ?? formatBytes(entry.size)}</small>
+            <small title={entry.message ?? formatBytes(entry.size)}>{entry.message ?? formatBytes(entry.size)}</small>
           </div>
         ))}
       </div>
@@ -4310,24 +4361,34 @@ function BucketObjectPreview({
 
 function ThreadList({
   threads,
+  total,
+  hasMore,
+  loadingMore,
   activeThreadId,
   folder,
   activeMailboxLabel,
-  onSelect
+  onSelect,
+  onLoadMore
 }: {
   threads: ThreadRow[];
+  total: number;
+  hasMore: boolean;
+  loadingMore: boolean;
   activeThreadId: string | null;
   folder: FolderKey;
   activeMailboxLabel: string | null;
   onSelect: (threadId: string) => void;
+  onLoadMore: () => void;
 }) {
+  const countLabel = total > threads.length ? `${threads.length} / ${total} loaded` : `${threads.length} threads`;
+
   return (
     <section className="thread-list">
       <div className="pane-head">
         <div>
           <span>{folder}</span>
           <strong>{activeMailboxLabel ?? "All mailboxes"}</strong>
-          <small>{threads.length} threads</small>
+          <small>{countLabel}</small>
         </div>
         <FolderGit2 size={16} />
       </div>
@@ -4339,6 +4400,7 @@ function ThreadList({
             <button
               key={`${thread.thread_id}-${thread.id}`}
               className={activeThreadId === thread.thread_id ? "thread-row active" : "thread-row"}
+              type="button"
               onClick={() => onSelect(thread.thread_id)}
             >
               <span className={thread.unread_count > 0 ? "unread-dot on" : "unread-dot"} />
@@ -4356,6 +4418,12 @@ function ThreadList({
             </button>
           ))
         )}
+        {hasMore ? (
+          <button className="button ghost wide thread-load-more" type="button" onClick={onLoadMore} disabled={loadingMore}>
+            {loadingMore ? <Loader2 className="spin-icon" size={15} /> : <ChevronDown size={15} />}
+            {loadingMore ? "Loading more" : `Load more (${Math.max(total - threads.length, 0)} left)`}
+          </button>
+        ) : null}
       </div>
     </section>
   );
@@ -4769,12 +4837,12 @@ function ThreadDetail({
           <h2>{firstMessage.subject || "(no subject)"}</h2>
         </div>
         <div className="detail-actions">
-          <button className="button ghost" onClick={() => void patchArchive()} disabled={busyAction !== null}>
-            <Archive size={16} />
-            {isArchived ? "Unarchive" : "Archive"}
+          <button className="button ghost" type="button" onClick={() => void patchArchive()} disabled={busyAction !== null}>
+            {busyAction === "archive" || busyAction === "unarchive" ? <Loader2 className="spin-icon" size={16} /> : <Archive size={16} />}
+            {busyAction === "archive" ? "Archiving" : busyAction === "unarchive" ? "Restoring" : isArchived ? "Unarchive" : "Archive"}
           </button>
-          <button className="button danger" onClick={() => void deleteCurrentThread()} disabled={busyAction !== null}>
-            <Trash2 size={16} />
+          <button className="button danger" type="button" onClick={() => void deleteCurrentThread()} disabled={busyAction !== null}>
+            {busyAction === "delete" ? <Loader2 className="spin-icon" size={16} /> : <Trash2 size={16} />}
             {busyAction === "delete" ? "Deleting" : "Delete"}
           </button>
         </div>

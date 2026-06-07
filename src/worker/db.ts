@@ -144,6 +144,14 @@ export type ThreadRow = MessageRow & {
   latest_at: string;
 };
 
+export type ThreadListResult = {
+  threads: ThreadRow[];
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+};
+
 export type NewMessage = {
   id?: string;
   threadId?: string;
@@ -913,11 +921,13 @@ export async function findThreadForHeaders(
 
 export async function listThreads(
   env: RuntimeEnv,
-  options: { folder: string; domainId?: string | null; mailboxId?: string | null; query?: string | null }
-): Promise<ThreadRow[]> {
+  options: { folder: string; domainId?: string | null; mailboxId?: string | null; query?: string | null; limit?: number; offset?: number }
+): Promise<ThreadListResult> {
   const filters: string[] = [];
   const params: unknown[] = [];
   const searchTerm = options.query?.trim();
+  const limit = Math.min(Math.max(Math.trunc(options.limit ?? 80), 1), 200);
+  const offset = Math.max(Math.trunc(options.offset ?? 0), 0);
 
   if (!searchTerm) {
     if (options.folder === "sent") {
@@ -977,6 +987,19 @@ export async function listThreads(
   }
 
   const where = filters.length > 0 ? filters.join(" AND ") : "1 = 1";
+  const totalRow = await env.DB.prepare(
+    `SELECT COUNT(*) AS total
+     FROM (
+       SELECT m.thread_id
+       FROM messages m
+       WHERE ${where}
+       GROUP BY m.thread_id
+     ) threads`
+  )
+    .bind(...params)
+    .first<{ total: number }>();
+
+  const total = Number(totalRow?.total ?? 0);
   const result = await env.DB.prepare(
     `WITH latest AS (
        SELECT m.thread_id, MAX(m.created_at) AS latest_at
@@ -991,12 +1014,19 @@ export async function listThreads(
      FROM messages m
      INNER JOIN latest ON latest.thread_id = m.thread_id AND latest.latest_at = m.created_at
      ORDER BY latest.latest_at DESC
-     LIMIT 80`
+     LIMIT ? OFFSET ?`
   )
-    .bind(...params)
+    .bind(...params, limit, offset)
     .all<ThreadRow>();
 
-  return result.results ?? [];
+  const threads = result.results ?? [];
+  return {
+    threads,
+    total,
+    limit,
+    offset,
+    hasMore: offset + threads.length < total
+  };
 }
 
 export async function getThread(

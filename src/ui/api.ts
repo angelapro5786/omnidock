@@ -10,7 +10,7 @@ import {
   ExternalSyncJobRow,
   SetupStatusPayload,
   ThreadPayload,
-  ThreadRow
+  ThreadListPayload
 } from "./types";
 
 const SEND_REQUEST_TIMEOUT_MS = 70_000;
@@ -103,12 +103,15 @@ export class ApiClient {
   threads(
     folder: string,
     mailboxId: string | null,
-    query: string
-  ): Promise<{ ok: true; threads: ThreadRow[]; stats: Record<string, number> }> {
+    query: string,
+    options: { limit?: number; offset?: number } = {}
+  ): Promise<ThreadListPayload> {
     const params = new URLSearchParams({ folder });
     if (mailboxId) params.set("mailboxId", mailboxId);
     if (query.trim()) params.set("q", query.trim());
-    return this.request<{ ok: true; threads: ThreadRow[]; stats: Record<string, number> }>(`/api/threads?${params.toString()}`);
+    if (options.limit) params.set("limit", String(options.limit));
+    if (options.offset) params.set("offset", String(options.offset));
+    return this.request<ThreadListPayload>(`/api/threads?${params.toString()}`);
   }
 
   thread(threadId: string): Promise<ThreadPayload> {
