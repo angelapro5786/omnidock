@@ -315,8 +315,9 @@ External sync modeli:
 
 - Sync butonuna basinca external account icin D1-backed job olusturulur.
 - Worker kisa bir immediate run baslatir.
-- Cron trigger her dakika job'lari devam ettirir.
-- Her run maksimum 15 dakika calismali.
+- Cron trigger varsayilan olarak 15 dakikada bir job'lari devam ettirir.
+- Scheduled maintenance ayni anda iki agir isi calistirmaz: once external mail pull, aktif mail isi yoksa R2 index devam eder.
+- Scheduled run'lar kisa batch'ler halinde calisir; cursor D1'de tutuldugu icin kalan is sonraki run'da devam eder.
 - Sure biterse cursor D1'de kalir.
 - Kullanici tekrar Sync'e basinca veya cron devam ettiginde kalan mailler cekilir.
 - Browser refresh veya sayfa kapatma sync'i iptal etmemelidir.

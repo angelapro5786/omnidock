@@ -1,6 +1,6 @@
-import { BUCKET_INDEX_MAX_RUN_MS, handleApi, recordBucketIndexRunFailure, runBucketIndexJobs } from "./api";
+import { BUCKET_INDEX_SCHEDULED_RUN_MS, handleApi, recordBucketIndexRunFailure, runBucketIndexJobs } from "./api";
 import { receiveEmail } from "./email";
-import { EXTERNAL_SYNC_MAX_RUN_MS, runExternalSyncJobs } from "./external-sync";
+import { EXTERNAL_SYNC_SCHEDULED_RUN_MS, runExternalSyncJobs } from "./external-sync";
 import { RuntimeEnv, json, withSecurityHeaders } from "./http";
 
 export default {
@@ -39,15 +39,23 @@ export default {
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     const runtimeEnv = env as RuntimeEnv;
     ctx.waitUntil(
-      runExternalSyncJobs(runtimeEnv, { maxDurationMs: EXTERNAL_SYNC_MAX_RUN_MS }).catch((error) => {
-        console.error("Failed to run external sync jobs", error);
+      runScheduledMaintenance(runtimeEnv).catch((error) => {
+        console.error("Failed to run scheduled maintenance", error);
       })
-    );
-    ctx.waitUntil(
-      runBucketIndexJobs(runtimeEnv, { maxDurationMs: BUCKET_INDEX_MAX_RUN_MS }).catch((error) => recordBucketIndexRunFailure(runtimeEnv, error))
     );
   }
 } satisfies ExportedHandler<Env>;
+
+async function runScheduledMaintenance(env: RuntimeEnv): Promise<void> {
+  const syncResult = await runExternalSyncJobs(env, { maxDurationMs: EXTERNAL_SYNC_SCHEDULED_RUN_MS });
+  if (syncResult.started > 0 || syncResult.hasMore) return;
+
+  try {
+    await runBucketIndexJobs(env, { maxDurationMs: BUCKET_INDEX_SCHEDULED_RUN_MS });
+  } catch (error) {
+    await recordBucketIndexRunFailure(env, error);
+  }
+}
 
 export function notFound(): Response {
   return json({ ok: false, error: { code: "not_found", message: "Not found" } }, { status: 404 });
